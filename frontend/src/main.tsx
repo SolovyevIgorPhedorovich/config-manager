@@ -1,0 +1,13 @@
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
+import AppWithNavigation from './components/AppWithNavigation.tsx'
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <AppWithNavigation/>
+    </BrowserRouter>
+  </React.StrictMode>,
+  
+)
