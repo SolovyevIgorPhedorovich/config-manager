@@ -1,0 +1,23 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: "configmanager"
+  datasource:
+    url: jdbc:postgresql://localhost:5432/mydatabase
+    driverClassName: org.postgresql.Driver
+    username: 
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+logging:
+  level:
+    com.example.configmanager: INFO
+    org.hibernate.SQL: DEBUG
