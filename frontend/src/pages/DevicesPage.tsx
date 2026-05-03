@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Tag, Empty, message } from 'antd';
+import { Card, Table, Space, Button, Tag, Empty, message } from 'antd';
 import { devicesApi } from '../api/devicesApi';
 import type { Device } from '../types';
+import SSHClient from '../components/SSHClient';
+import { CodeOutlined } from "@ant-design/icons"
 
 const deviceTypeInfo: Record<string, { name: string; color: string }> = {
   windows: { name: 'ПК', color: '#1890ff' },
@@ -13,6 +15,8 @@ const deviceTypeInfo: Record<string, { name: string; color: string }> = {
 export default function DevicesPage({ type }: { type?: string }) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null); 
+  const [showSSH, setShowSSH] = useState(false);
 
   useEffect(() => {
     loadDevices();
@@ -50,6 +54,22 @@ export default function DevicesPage({ type }: { type?: string }) {
         );
       },
     },
+    {
+    title: 'Действия',
+    key: 'actions',
+    render: (_: any, record: Device) => (
+      <Space size="small">
+        {/* Кнопка SSH */}
+        <Button
+          icon={<CodeOutlined />}
+          onClick={() => {setSelectedDevice(record); setShowSSH(true)}}
+          type="default"
+        >
+          SSH
+        </Button>
+      </Space>
+    ),
+  },
   ];
 
   return (
@@ -75,6 +95,11 @@ export default function DevicesPage({ type }: { type?: string }) {
           />
         </Card>
       )}
+      <SSHClient
+        open={showSSH} 
+        onClose={() => setShowSSH(false)} 
+        device={{ hostname: selectedDevice?.hostname || '', ip: selectedDevice?.ip || '' }}
+    />
     </>
   );
 }
