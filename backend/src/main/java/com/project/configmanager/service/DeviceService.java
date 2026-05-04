@@ -92,6 +92,10 @@ public class DeviceService {
         return deviceRepo.save(device);
     }
 
+    public List<Device> addAll(List<Device> devicesList) {
+        return deviceRepo.saveAll(devicesList);
+    }
+
     public Device update(Long id, Device updatedDevice) {
         if (!deviceRepo.existsById(id)) {
             throw new RuntimeException("Устройство не найдено");
