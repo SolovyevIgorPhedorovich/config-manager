@@ -1,4 +1,5 @@
 export type DeviceTypeCode = 0 | 1 | 2 | 3;
+export type CommunityVersion = 0 | 1 | 2;
 
 export interface Device {
   id?: number;
@@ -10,6 +11,14 @@ export interface Device {
   osVersion?: string;
   isActive: boolean;
   createdAt?: string;
+}
+
+export interface ScanOption {
+  ip: string;
+  mask: number
+  port: number;
+  community: CommunityVersion;
+  snmpv: string;
 }
 
 export enum ConfigTypeCode {

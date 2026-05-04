@@ -4,6 +4,8 @@ import { devicesApi } from '../api/devicesApi';
 import type { Device } from '../types';
 import SSHClient from '../components/SSHClient';
 import { CodeOutlined } from "@ant-design/icons"
+import { ScanDeviceModal } from '../components/ScanDeviceModal';
+import { ScanOption } from "../types"
 
 const deviceTypeInfo: Record<string, { name: string; color: string }> = {
   windows: { name: 'ПК', color: '#1890ff' },
@@ -17,6 +19,7 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [loading, setLoading] = useState(true);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null); 
   const [showSSH, setShowSSH] = useState(false);
+  const [showScan, setShowScan] = useState(false);
 
   useEffect(() => {
     loadDevices();
@@ -72,6 +75,38 @@ export default function DevicesPage({ type }: { type?: string }) {
   },
   ];
 
+  const hanldleScan = async (options: Partial<ScanOption>) => {
+        setShowScan(false)
+        setLoading(true);
+        try {
+            const url = new URL ('http://localhost:8080/devices/scan', window.location.origin);
+            url.searchParams.append("ip", ip);
+            url.searchParams.append("mask", mask.toString());
+            url.searchParams.append("port", port.toString());
+            url.searchParams.append("community", community);
+            url.searchParams.append("snmpv", snmpv);
+            
+            console.log(url.toString())
+
+            const response = await fetch(url.toString(), {
+                method: 'GET',
+                headers: {
+                    'Content_Type': 'application/json',
+                }
+            });
+
+            if  (!response.ok) {
+                throw new Error('ошибка сети');
+            }
+            
+            const data = await response.json();
+			setDevices(data);
+        } catch (err: any) {
+		} finally {
+			setLoading(false);
+		}
+    }
+
   return (
     <>
       <h2>
@@ -100,6 +135,11 @@ export default function DevicesPage({ type }: { type?: string }) {
         onClose={() => setShowSSH(false)} 
         device={{ hostname: selectedDevice?.hostname || '', ip: selectedDevice?.ip || '' }}
     />
+      <ScanDeviceModal
+        open={showScan}
+        onCancel={() => setShowScan(false)}
+        onScan={hanldleScan}
+      />
     </>
   );
 }
