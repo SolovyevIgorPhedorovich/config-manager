@@ -8,7 +8,7 @@ spring:
     url: jdbc:postgresql://localhost:5432/mydatabase
     driverClassName: org.postgresql.Driver
     username: 
-    password: ""
+    password:
   jpa:
     hibernate:
       ddl-auto: none
@@ -16,6 +16,11 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+  main:
+    allow-bean-definition-overriding: true
+
+scanner:
+  max-parallel: 16
 
 logging:
   level:

@@ -3,9 +3,11 @@ import { Card, Table, Space, Button, Tag, Empty, message } from 'antd';
 import { devicesApi } from '../api/devicesApi';
 import type { Device } from '../types';
 import SSHClient from '../components/SSHClient';
-import { CodeOutlined } from "@ant-design/icons"
+import { CodeOutlined, ScanOutlined, PlusCircleOutlined } from "@ant-design/icons"
 import { ScanDeviceModal } from '../components/ScanDeviceModal';
+import { AddDeviceModal } from '../components/AddDeviceModal';
 import { ScanOption } from "../types"
+import { ScanProgress } from '../components/ScanProgress';
 
 const deviceTypeInfo: Record<string, { name: string; color: string }> = {
   windows: { name: 'ПК', color: '#1890ff' },
@@ -20,6 +22,9 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null); 
   const [showSSH, setShowSSH] = useState(false);
   const [showScan, setShowScan] = useState(false);
+  const [showAddDevice, setShowAddDevice] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
 
   useEffect(() => {
     loadDevices();
@@ -75,46 +80,113 @@ export default function DevicesPage({ type }: { type?: string }) {
   },
   ];
 
-  const hanldleScan = async (options: Partial<ScanOption>) => {
-        setShowScan(false)
-        setLoading(true);
-        try {
-            const url = new URL ('http://localhost:8080/devices/scan', window.location.origin);
-            url.searchParams.append("ip", ip);
-            url.searchParams.append("mask", mask.toString());
-            url.searchParams.append("port", port.toString());
-            url.searchParams.append("community", community);
-            url.searchParams.append("snmpv", snmpv);
-            
-            console.log(url.toString())
-
-            const response = await fetch(url.toString(), {
-                method: 'GET',
-                headers: {
-                    'Content_Type': 'application/json',
-                }
-            });
-
-            if  (!response.ok) {
-                throw new Error('ошибка сети');
-            }
-            
-            const data = await response.json();
-			setDevices(data);
-        } catch (err: any) {
-		} finally {
-			setLoading(false);
-		}
+  const handleAddDevice = async (device: Partial<Device>) => {
+    try {
+      const res = await devicesApi.add(device as Device);
+      message.success('Устройство успешно добавлено');
+      setDevices(prev => [...prev, res.data]);
+    } catch (err) {
+      console.error(err);
+      message.error('Не удалось добавить устройство');
     }
+  };
+
+  const handleScan = async (options: any) => {
+  setShowScan(false);
+  setLoading(true);
+
+  try {
+    setShowScan(false);
+    setIsScanning(true);
+    setScanProgress(0);
+    const { ipaddr, mask, port, community, snmpv } = options;
+
+    const urlStart = new URL('/api/devices/scan', window.location.origin);
+    urlStart.searchParams.append('ipaddr', ipaddr);
+    urlStart.searchParams.append('mask', String(mask));
+    urlStart.searchParams.append('port', String(port));
+    urlStart.searchParams.append('community', community);
+    urlStart.searchParams.append('snmpv', snmpv);
+
+    const startRes = await fetch(urlStart.toString(), { method: 'GET' });
+    if (!startRes.ok) throw new Error(`Ошибка запуска: ${await startRes.text()}`);
+    
+    const startData = await startRes.json();
+    if (startData.error) throw new Error(startData.error);
+
+    const taskId = startData.taskId;
+    message.success('Сканирование запущено!');
+
+    let statusData: any = { status: 'running' };
+    let progress = 0;
+    while (statusData.status === 'running') {
+      await new Promise(r => setTimeout(r, 1000));
+
+      const urlStatus = new URL('/api/devices/scan/status', window.location.origin);
+      urlStatus.searchParams.append('taskId', taskId);
+
+      const statusRes = await fetch(urlStatus.toString());
+      if (!statusRes.ok) throw new Error(`Ошибка статуса: ${await statusRes.text()}`);
+      
+      statusData = await statusRes.json();
+      progress += 10;
+      setScanProgress(Math.min(progress, 90)); 
+    }
+
+    if (statusData.status === 'completed') {
+      const newDevices: Device[] = statusData.devices || [];
+      setDevices(prev => {
+        const existingIps = new Set(prev.map(d => d.ip));
+        return [
+          ...prev,
+          ...newDevices.filter(d => !existingIps.has(d.ip))
+        ];
+      });
+      message.success(`Найдено и добавлено ${statusData.count} новых устройств`);
+    }
+
+  } catch (err: any) {
+    console.error(err);
+    message.error(`Ошибка сканирования: ${err.message || 'Неизвестная ошибка'}`);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   return (
     <>
-      <h2>
-        Устройства: {type ? deviceTypeInfo[type]?.name : 'Все типы'}
-        <span style={{ marginLeft: 16, fontSize: '0.9em', color: '#666' }}>
-          ({devices.length} шт.)
-        </span>
-      </h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2>
+          Устройства:
+          {type ? ` ${deviceTypeInfo[type]?.name}` : ' Всего'} 
+          <span style={{ marginLeft: 16, fontSize: '0.9em', color: '#666' }}>
+            ({devices.length} шт.)
+          </span>
+        </h2>
+
+        <Space>
+          <Button
+            icon={<ScanOutlined />}
+            type="primary"
+            onClick={() => setShowScan(true)}
+          >
+            Сканировать сеть
+          </Button>
+
+          <Button
+            icon={<PlusCircleOutlined />}
+            type="default"
+            onClick={() => setShowAddDevice(true)}
+          >
+            Добавить устройство
+          </Button>
+        </Space>
+      </div>
+
+      {
+        isScanning && <ScanProgress progress={scanProgress} />
+      }
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}>Загрузка...</div>
@@ -130,15 +202,25 @@ export default function DevicesPage({ type }: { type?: string }) {
           />
         </Card>
       )}
+
+      {/* Модалки */}
       <SSHClient
-        open={showSSH} 
-        onClose={() => setShowSSH(false)} 
-        device={{ hostname: selectedDevice?.hostname || '', ip: selectedDevice?.ip || '' }}
-    />
+        open={showSSH}
+        onClose={() => setShowSSH(false)}
+        device={{
+          hostname: selectedDevice?.hostname || '',
+          ip: selectedDevice?.ip || '',
+        }}
+      />
       <ScanDeviceModal
         open={showScan}
         onCancel={() => setShowScan(false)}
-        onScan={hanldleScan}
+        onScan={handleScan}
+      />
+      <AddDeviceModal
+        open={showAddDevice}
+        onCancel={() => setShowAddDevice(false)}
+        onAdd={handleAddDevice}
       />
     </>
   );

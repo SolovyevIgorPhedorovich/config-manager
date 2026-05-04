@@ -1,6 +1,5 @@
 package com.project.configmanager.model;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.project.configmanager.model.enums.AuditAction;
 import com.project.configmanager.model.enums.TaskStatus;
 

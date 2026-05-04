@@ -1,125 +1,103 @@
-import React, { useState } from "react";
-import { Modal, Form, Input, Select, Button, message } from "antd";
-import { ScanOption } from "../types"
+// src/components/ScanDeviceModal.tsx
 
-interface ScanDeviceModalProps {
-    open: boolean;
-    onScan: (options: Partial<ScanOption>) => Promise<void>;
-    onCancel: () => void;
+import React, { useState } from 'react';
+import { Modal, Form, InputNumber, Input, Select, Button, message, Typography } from 'antd';
+
+const { Text } = Typography;
+
+interface ScanOptions {
+  ipaddr: string;
+  mask: number;
+  port: number;
+  community: string;
+  snmpv: string;
 }
 
-export const ScanDeviceModal:
-    React.FC<ScanDeviceModalProps> = ({ open, onScan, onCancel }) => {
-        const [form] = Form.useForm();
-        const [loading, setLoading] =useState(false);
-        const [ip, setIP] = useState<string>('');
-        const [mask, setMask] = useState<number>(24);
-        const [port, setPort] = useState<number>(161);
-        const [community, setCommunity] = useState<string>('public');
-        const [snmpv, setSNMPVersion] = useState<string> ('v1');
+export const ScanDeviceModal: React.FC<{
+  open: boolean;
+  onCancel: () => void;
+  onScan: (options: ScanOptions) => Promise<void>;
+}> = ({ open, onCancel, onScan }) => {
+  const [form] = Form.useForm();
+  const [loading, setLoading] = useState(false);
 
-        const communityVersion = [
-            {
-                value: 0,
-                label: "v1"
-            },
-            {
-                value: 1,
-                label: "v2c"
-            },
-            {
-                value: 2,
-                label: "v3"
-            }
-        ]
+  const handleSubmit = async () => {
+    try {
+      const values = await form.validateFields();
+      setLoading(true);
+      await onScan(values as ScanOptions);
+      message.success('Сканирование запущено. Подождите...');
+      onCancel();
+    } catch (error) {
+      console.error(error);
+      message.error('Ошибка');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        const handleSubmit = async () => {
-            try {
-                const values = await form.validateFields();
-                setLoading(true);
-                await onScan(values);
-                message.success('Устройство добавлено');
-                form.resetFields();
-                onCancel();
-            } catch (error) {
-                console.error('Ошибка добавления:', error);
-                message.error('Не удалось добавить устройство');
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        return (
+  return (
     <Modal
-      title="Поиск устройств"
+      title="🔍 Автоматический поиск устройств"
       open={open}
-      onCancel={() => { form.resetFields(); onCancel(); }}
+      onCancel={onCancel}
       footer={[
-        <Button key="cancel" onClick={() => { form.resetFields(); onCancel(); }}>
-          Отмена
-        </Button>,
-        <Button
-          key="submit"
-          type="primary"
-          loading={loading}
-          onClick={handleSubmit}
-        >
-          Поиск
-        </Button>,
+        <Button key="cancel" onClick={onCancel}>Отмена</Button>,
+        <Button key="submit" type="primary" loading={loading} onClick={handleSubmit}>
+          Запустить сканирование
+        </Button>
       ]}
     >
-      <Form form={form} layout="vertical" initialValues={{ isActive: true }}>
+      <Form form={form} layout="vertical">
         <Form.Item
-          name="ip"
-          label="IP-адрес"
-          rules={[
-            { required: true, message: 'Введите IP-адрес' },
-            {
-              pattern: /^(\d{1,3}\.){3}\d{1,3}$/,
-              message: 'Некорректный формат IP',
-            },
-          ]}
+          name="ipaddr"
+          label="Сетевой адрес (начало)"
+          initialValue="192.168.1.1"
+          rules={[{ required: true, message: 'Введите IP' }]}
         >
-          <Input placeholder="например, 192.168.1.105" />
+          <Input placeholder="Например: 192.168.1.1" />
         </Form.Item>
 
         <Form.Item
-            name="mask"
-            label="Маска сети">
-        </Form.Item>
-
-        <Form.Item
-            name="port"
-            label="Порт">
-        </Form.Item>
-
-        <Form.Item
-          name="SNMP community"
-          label="SNMP community"
-          rules={[{ required: true, message: 'Выберите версию' }]}
+          name="mask"
+          label="Маска сети (CIDR)"
+          initialValue={24}
+          tooltip="Рекомендуется /24 для локальной сети"
+          rules={[{ required: true, message: 'Введите маску' }]}
         >
-          <Select
-            options={communityVersion}
-            showSearch={{ optionFilterProp: 'label' }}
-            popupRender={(menu) => (
-              <>
-                {React.cloneElement(menu as React.ReactElement, {
-                  style: { maxHeight: 300, overflowY: 'auto' },
-                })}
-              </>
-            )}
-          />
+          <InputNumber min={0} max={30} />
+        </Form.Item>
+
+        <Form.Item
+          name="port"
+          label="SNMP-порт"
+          initialValue={161}
+          tooltip="Стандартный порт SNMP — 161"
+        >
+          <InputNumber disabled />
+        </Form.Item>
+
+        <Form.Item
+          name="community"
+          label="Community string"
+          initialValue="public"
+          tooltip="Для безопасности используйте кастомную community (не public!)"
+        >
+          <Input />
+        </Form.Item>
+
+        <Form.Item
+          name="snmpv"
+          label="Версия SNMP"
+          rules={[{ required: true }]}
+        >
+          <Select>
+            <option value="v1">SNMP v1</option>
+            <Select.Option value="v2c">SNMP v2c (рекомендуется)</Select.Option>
+             <option value="v3">SNMP v3</option>
+          </Select>
         </Form.Item>
       </Form>
-
-      <div style={{ marginTop: 16, padding: '12px', background: '#f0f5ff', borderRadius: 4 }}>
-        <strong>💡 Совет:</strong>
-        <p style={{ margin: '8px 0' }}>
-          Для Windows-устройств убедитесь, что включён WinRM или SSH-сервис.  
-          Для МФУ — разрешите SNMP и REST API.  
-          Для Cisco — включите `netconf-yang` и `http/https server`.
-        </p>
-      </div>
     </Modal>
   );
-}
+};

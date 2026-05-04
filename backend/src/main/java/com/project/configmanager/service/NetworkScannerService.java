@@ -1,226 +1,239 @@
+// NetworkScannerService.java — полная рабочая версия
+
 package com.project.configmanager.service;
 
-import java.io.IOException;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
-import org.snmp4j.CommunityTarget;
-import org.snmp4j.PDU;
-import org.snmp4j.Snmp;
-import org.snmp4j.TransportMapping;
+import org.snmp4j.*;
 import org.snmp4j.event.ResponseEvent;
 import org.snmp4j.mp.SnmpConstants;
-import org.snmp4j.smi.Address;
-import org.snmp4j.smi.GenericAddress;
-import org.snmp4j.smi.OID;
-import org.snmp4j.smi.OctetString;
-import org.snmp4j.smi.UdpAddress;
-import org.snmp4j.smi.VariableBinding;
+import org.snmp4j.smi.*;
 import org.snmp4j.transport.DefaultUdpTransportMapping;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import com.project.configmanager.SettingManagerApplication;
-import com.project.configmanager.controller.DeviceController;
 import com.project.configmanager.model.Device;
+import com.project.configmanager.repository.DeviceRepository;
+
+import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 public class NetworkScannerService {
 
+    private final DeviceRepository deviceRepo;
 
-    @Autowired
-    private DeviceService deviceService;
+    @Value("${scanner.max-parallel:16}")
+    private int maxParallel = 16;
 
-    private Device device;
-
-    private static final String baseOID = "1.3.6.1.2.1.1.1.0";
-    private List<Device> deviceList;
-
-    private byte[] calculateBroadcastAddres(byte[] ip, int mask){
-        byte[] result = new byte[4];
-        int fullMask = 0xFFFFFFFF << (32 - mask);
-        int hostMask = ~fullMask;
-        for (int i = 0; i < 4; i++) {
-            result[i] = (byte) ((ip[i] & 0xFF) | (hostMask >> (24 - i * 8)));
-        }
-        return result;
+    public NetworkScannerService(DeviceRepository deviceRepo) {
+        this.deviceRepo = deviceRepo;
     }
 
-    // Увеличивает IP-адрес на 1
-    private void incrementIp(byte[] ipBytes) {
-        for (int i = 3; i >= 0; i--) {
-            if (ipBytes[i] == (byte) 0xFF) {
-                ipBytes[i] = 0; // Переполнение, переходим к следующему октету
-            } else {
-                ipBytes[i]++;
+    @Async("taskExecutor")
+    public CompletableFuture<List<Device>> scanAsync(String ipStart, int mask, int port, String community, String snmpVersion) {
+        List<Device> foundDevices = new ArrayList<>();
+        
+        try {
+            if (mask < 0 || mask > 32) throw new IllegalArgumentException("Маска должна быть от 0 до 32");
+            
+            InetAddress startIp = InetAddress.getByName(ipStart);
+            byte[] ipBytes = startIp.getAddress();
+            int hostsCount = (int) Math.pow(2, 32 - mask);
+
+            if (hostsCount > 10_000) {
+                throw new IllegalArgumentException("Слишком большая сеть! Максимум: /24 (256 хостов)");
+            }
+
+            ExecutorService executor = Executors.newFixedThreadPool(maxParallel);
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
+            
+            for (int i = 0; i < hostsCount; i++) {
+                byte[] currentIp = ipBytes.clone();
+                
+                // Увеличиваем IP на i
+                int carry = i;
+                for (int j = 3; j >= 0; j--) {
+                    int sum = (currentIp[j] & 0xFF) + carry;
+                    currentIp[j] = (byte) (sum % 256);
+                    carry = sum / 256;
+                    if (carry == 0) break;
+                }
+
+                String ipStr = ((currentIp[0] & 0xFF) + "." +
+                                (currentIp[1] & 0xFF) + "." +
+                                (currentIp[2] & 0xFF) + "." +
+                                (currentIp[3] & 0xFF));
+
+                // Пропускаем сетевой и broadcast адреса
+                if (mask > 0 && mask < 32) {
+                    try {
+                        InetAddress addr = InetAddress.getByName(ipStr);
+                        byte[] netAddr = getNetworkAddressBytes(addr, mask);
+                        byte[] brdAddr = getBroadcastAddressBytes(addr, mask);
+
+                        if (InetAddress.getByAddress(netAddr).equals(addr)) continue; // сетевой адрес
+                        if (InetAddress.getByAddress(brdAddr).equals(addr)) continue; // broadcast
+                    } catch (Exception e) {
+                        // Пропускаем ошибки IP-адресов
+                    }
+                }
+
+                futures.add(CompletableFuture.runAsync(() -> {
+                    try {
+                        Device device = probeDevice(ipStr, port, community, snmpVersion);
+                        if (device != null && !deviceRepo.existsByIp(device.getIp())) {
+                            synchronized (foundDevices) {
+                                foundDevices.add(device);
+                            }
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Ошибка при сканировании " + ipStr + ": " + e.getMessage());
+                    }
+                }, executor));
+            }
+
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            executor.shutdown();
+
+            int savedCount = deviceRepo.saveAll(foundDevices).size();
+            System.out.printf("Найдено %d устройств, сохранено %d новых.%n", foundDevices.size(), savedCount);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Ошибка сканирования: " + e.getMessage(), e);
+        }
+
+        return CompletableFuture.completedFuture(foundDevices);
+    }
+
+    // --- Методы для SNMP-запросов ---
+
+    private Device probeDevice(String ip, int port, String community, String version) throws Exception {
+        TransportMapping<UdpAddress> transport = new DefaultUdpTransportMapping();
+        Snmp snmp = null;
+
+        try {
+            snmp = new Snmp(transport);
+            transport.listen();
+
+            Address targetAddr = GenericAddress.parse("udp:" + ip + "/" + port);
+            CommunityTarget<Address> target = new CommunityTarget<>();
+            target.setCommunity(new OctetString(community));
+            target.setAddress(targetAddr);
+            target.setRetries(1);
+            target.setTimeout(500);
+
+            switch (version) {
+                case "v1": target.setVersion(SnmpConstants.version1); break;
+                case "v2c": target.setVersion(SnmpConstants.version2c); break;
+                default: throw new IllegalArgumentException("Поддерживаемые версии SNMP: v1, v2c");
+            }
+
+            PDU pdu = new PDU();
+            pdu.add(new VariableBinding(SnmpConstants.sysName));
+            pdu.add(new VariableBinding(SnmpConstants.sysDescr));
+            pdu.setType(PDU.GET);
+
+            ResponseEvent<Address> response = snmp.send(pdu, target);
+
+            if (response != null && response.getResponse() != null) {
+                PDU respPDU = response.getResponse();
+                String hostname = getStr(respPDU, SnmpConstants.sysName);
+                String osVersion = getStr(respPDU, SnmpConstants.sysDescr);
+
+                if (hostname == null || hostname.trim().isEmpty()) return null;
+
+                Device device = new Device();
+                device.setHostname(hostname.trim());
+                device.setIp(ip);
+                device.setTypeCode(detectDeviceType(osVersion));
+                device.setGroupName("Скан: " + ip);
+                device.setOsVersion(osVersion != null ? osVersion : "Unknown");
+                device.setIsActive(true);
+
+                return device;
+            }
+        } finally {
+            if (snmp != null) {
+                try { snmp.close(); } catch (Exception ignored) {}
+            }
+            try { transport.close(); } catch (Exception ignored) {}
+        }
+
+        return null;
+    }
+
+    private String getStr(PDU pdu, OID oid) {
+        if (pdu == null || pdu.size() == 0) return null;
+
+        for (VariableBinding vb : pdu.getVariableBindings()) {
+        if (vb != null && oid.equals(vb.getOid())) {
+            Variable var = vb.getVariable();
+            return var == null ? null : var.toString();
+        }
+    }
+        return null;
+    }
+
+    private int detectDeviceType(String osVersion) {
+        if (osVersion == null) return 6;
+
+        String lower = osVersion.toLowerCase();
+
+        if (lower.contains("windows")) return 0;
+        if (lower.contains("linux") || lower.contains("alt linux")) return 1;
+        if (lower.contains("canon")) return 2;
+        if (lower.contains("kyocera")) return 3;
+        if (lower.contains("cisco") && lower.contains("switch")) return 4;
+        if (lower.contains("cisco") && lower.contains("router")) return 5;
+
+        return 6; // Proxmox/VM по умолчанию
+    }
+
+    // --- Вспомогательные методы IP ---
+
+    private byte[] getNetworkAddressBytes(InetAddress addr, int mask) {
+        try {
+            byte[] ip = addr.getAddress();
+            if (mask == 0) return new byte[]{0, 0, 0, 0};
+
+            int fullOctets = mask / 8;
+            int bitsInLastOctet = mask % 8;
+
+            for (int i = 0; i < 4; i++) {
+                if (i < fullOctets) continue;
+                byte maskByte = (byte) (0xff << (8 - bitsInLastOctet));
+                ip[i] &= maskByte;
                 break;
             }
+            return ip;
+        } catch (Exception e) {
+            throw new RuntimeException("Ошибка расчета сетевого адреса", e);
         }
     }
 
-    // Сравнивает два IP-адреса (массивы байт)
-    private int compareIpBytes(byte[] ip1, byte[] ip2) {
-        for (int i = 0; i < 4; i++) {
-            int b1 = ip1[i] & 0xFF;
-            int b2 = ip2[i] & 0xFF;
-            if (b1 != b2) {
-                return Integer.compare(b1, b2);
-            }
-        }
-        return 0;
-    }
-
-    public List<Device> scan(String ipaddr, int mask, int port, String community, String snmpv) {
-        deviceList = new ArrayList<>();
+    private byte[] getBroadcastAddressBytes(InetAddress addr, int mask) {
         try {
-            TransportMapping<UdpAddress> transportMapping = new DefaultUdpTransportMapping();
-            transportMapping.listen();
+            byte[] ip = addr.getAddress();
+            if (mask == 32) return ip;
+            if (mask == 0) return new byte[]{(byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff};
 
-            Snmp snmp = new Snmp(transportMapping);
-            
-            byte[] ip = ipToByteFormat(ipaddr);
-            byte[] broadcastAddress = calculateBroadcastAddres(ip, mask); // Конечный адресс
+            int fullOctets = mask / 8;
+            int bitsInLastOctet = mask % 8;
 
-            while (compareIpBytes(ip, broadcastAddress) != 0) {
-                String ip_str = ipToStringFormat(ip);
-                Address targetAddress = GenericAddress.parse(String.format("udp:%s/%d",ip_str, port));
-                CommunityTarget<Address> target = new CommunityTarget<>();
-                target.setCommunity(new OctetString(community));
-                target.setAddress(targetAddress);
-                target.setRetries(2);
-                target.setTimeout(1000);
-                switch(snmpv){
-                    case "v1":
-                        target.setVersion(SnmpConstants.version1);
-                        break;
-                    case "v2c":
-                        target.setVersion(SnmpConstants.version2c);
-                        break;
-                    case "v3":
-                        target.setVersion(SnmpConstants.version3);
-                        break;
-                }
-
-                PDU pdu = new PDU();
-                pdu.add(new VariableBinding(new OID(baseOID)));
-                pdu.setType(PDU.GET);
-
-                ResponseEvent<Address> event = snmp.send(pdu, target);
-
-                // Обработка ответа
-                if (event != null && event.getResponse() != null) {
-                    PDU responsePDU = event.getResponse();
-                    if (responsePDU.getErrorStatus() == PDU.noError) {
-                        for (VariableBinding vb : responsePDU.getVariableBindings()) {
-                            System.out.printf("%s -> %s = %s%n", ip, vb.getOid(), vb.getVariable().toString());
-                            device = new Device();
-                            device.setOsVersion(vb.getVariable().toString().split(",")[1].trim());
-                            device.setIp(ip_str);
-                            device.setGroupName(vb.getVariable().toString().split(",")[0]);
-                            getLoaction(snmp, target); //nd.setLocation(ip);
-                            getMACAddre(snmp, target); //md.setMACAddres();
-                            getName(snmp, target); //nd.setName(ip);
-                            deviceList.add(device);
-                        }
-                    } else {
-                        System.out.printf("%s -> Error: %s", ip, responsePDU.getErrorStatusText());
-                    }
-                } else {
-                    System.out.printf("%s -> No response or timeout.", ip);
-                }
-
-                incrementIp(ip);
+            for (int i = 0; i < 4; i++) {
+                if (i < fullOctets) continue;
+                byte maskByte = (byte) (~((0xff << (8 - bitsInLastOctet)) & 0xFF));
+                ip[i] |= maskByte;
+                break;
             }
-
-            snmp.close();
-
-            if (!deviceList.isEmpty()){
-                deviceService.addAll(deviceList);
-            }
-            return deviceList;
-
-        } catch (Exception e)
-        {
-            e.printStackTrace();
-            return null;
+            return ip;
+        } catch (Exception e) {
+            throw new RuntimeException("Ошибка расчета broadcast-адреса", e);
         }
     }
 
-    private void getMACAddre(Snmp snmp, CommunityTarget<Address> target) throws IOException { 
-        String OID = "1.3.6.1.2.1.2.2.1.6.50";
-        PDU pdu = new PDU();
-        pdu.add(new VariableBinding(new OID(OID)));
-        pdu.setType(PDU.GET);
-
-        ResponseEvent<Address> event = snmp.send(pdu, target);
-        if (event != null && event.getResponse() != null) {
-            PDU responsePDU = event.getResponse();
-            if (responsePDU.getErrorStatus() == PDU.noError) {
-                for (VariableBinding vb : responsePDU.getVariableBindings()) {
-//                    device.setMACAddres(vb.getVariable().toString());
-                }
-            } else {
-                System.out.printf("Error: %s", responsePDU.getErrorStatusText());
-            }
-        } else {
-            System.out.printf("No response or timeout.");
-        }
-    }
-
-    private void getLoaction(Snmp snmp, CommunityTarget<Address> target) throws IOException{
-        String OID = "1.3.6.1.2.1.1.6.0";
-        PDU pdu = new PDU();
-        pdu.add(new VariableBinding(new OID(OID)));
-        pdu.setType(PDU.GET);
-
-        ResponseEvent<Address> event = snmp.send(pdu, target);
-        if (event != null && event.getResponse() != null) {
-            PDU responsePDU = event.getResponse();
-            if (responsePDU.getErrorStatus() == PDU.noError) {
-                for (VariableBinding vb : responsePDU.getVariableBindings()) {
-//                    device.setLocation(vb.getVariable().toString());
-                }
-            } else {
-                System.out.printf("Error: %s", responsePDU.getErrorStatusText());
-            }
-        } else {
-            System.out.printf("No response or timeout.");
-        }
-    }
-
-    private void getName(Snmp snmp, CommunityTarget<Address> target) throws IOException{
-        String OID = "1.3.6.1.2.1.1.5.0";
-        PDU pdu = new PDU();
-        pdu.add(new VariableBinding(new OID(OID)));
-        pdu.setType(PDU.GET);
-
-        ResponseEvent<Address> event = snmp.send(pdu, target);
-        if (event != null && event.getResponse() != null) {
-            PDU responsePDU = event.getResponse();
-            if (responsePDU.getErrorStatus() == PDU.noError) {
-                for (VariableBinding vb : responsePDU.getVariableBindings()) {
-                    device.setHostname(vb.getVariable().toString());
-                }
-            } else {
-                System.out.printf("Error: %s", responsePDU.getErrorStatusText());
-            }
-        } else {
-            System.out.printf("No response or timeout.");
-        }
-    }
-
-    private byte[] ipToByteFormat(String ip_addr) throws UnknownHostException {
-        InetAddress ip = InetAddress.getByName(ip_addr);
-        return ip.getAddress();
-    }
-
-    private String ipToStringFormat(byte[] ip) {
-        return (ip[0] & 0xFF) + "." +
-               (ip[1] & 0xFF) + "." +
-               (ip[2] & 0xFF) + "." +
-               (ip[3] & 0xFF);
-    }
 }
