@@ -11,8 +11,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import com.project.configmanager.model.Device;
-import com.project.configmanager.model.DeviceIP;
+import com.project.configmanager.model.device.DeviceInfo;
+import com.project.configmanager.model.device.DeviceOS;
+import com.project.configmanager.model.device.DeviceGroup;
+import com.project.configmanager.model.device.DeviceIP;
 import com.project.configmanager.repository.DeviceRepository;
 
 import java.net.InetAddress;
@@ -35,8 +37,8 @@ public class NetworkScannerService {
     }
 
     @Async("taskExecutor")
-    public CompletableFuture<List<Device>> scanAsync(String ipStart, int mask, int port, String community, String snmpVersion) {
-        List<Device> foundDevices = new ArrayList<>();
+    public CompletableFuture<List<DeviceInfo>> scanAsync(String ipStart, int mask, int port, String community, String snmpVersion) {
+        List<DeviceInfo> foundDevices = new ArrayList<>();
         
         try {
             if (mask < 0 || mask > 32) throw new IllegalArgumentException("Маска должна быть от 0 до 32");
@@ -84,8 +86,8 @@ public class NetworkScannerService {
 
                 futures.add(CompletableFuture.runAsync(() -> {
                     try {
-                        Device device = probeDevice(ipStr, port, community, snmpVersion);
-                        if (device != null && !deviceRepo.existsByIp(device.getIp().get(0).getIpString())) {
+                        DeviceInfo device = probeDevice(ipStr, port, community, snmpVersion);
+                        if (device != null && !deviceRepo.existsByIp(device.getIps().get(0).getIp())) {
                             synchronized (foundDevices) {
                                 foundDevices.add(device);
                             }
@@ -111,7 +113,7 @@ public class NetworkScannerService {
 
     // --- Методы для SNMP-запросов ---
 
-    private Device probeDevice(String ip, int port, String community, String version) throws Exception {
+    private DeviceInfo probeDevice(String ip, int port, String community, String version) throws Exception {
         TransportMapping<UdpAddress> transport = new DefaultUdpTransportMapping();
         Snmp snmp = null;
 
@@ -147,15 +149,19 @@ public class NetworkScannerService {
 
                 if (hostname == null || hostname.trim().isEmpty()) return null;
 
-                Device device = new Device();
+                DeviceInfo device = new DeviceInfo();
                 DeviceIP deviceIP = new DeviceIP();
+                DeviceOS deviceOS = new DeviceOS();
+                DeviceGroup deviceGroup = new DeviceGroup();
+                deviceGroup.setName("");
                 deviceIP.setDevice(device);
                 deviceIP.setIp(ip);
+                deviceOS.setName(osVersion);
                 device.setHostname(hostname.trim());
                 device.setIp(deviceIP);
                 device.setTypeCode(detectDeviceType(osVersion));
-                device.setGroupName("Скан: " + ip);
-                device.setOsVersion(osVersion != null ? osVersion : "Unknown");
+                device.setGroup(deviceGroup);
+                device.setOsVersion(deviceOS);
                 device.setIsActive(true);
 
                 return device;

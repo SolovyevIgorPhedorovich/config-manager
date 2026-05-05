@@ -4,7 +4,7 @@ export type CommunityVersion = 0 | 1 | 2;
 export interface Device {
   id?: number;
   hostname: string;
-  ip: string;
+  ips: string[];
   typeCode: DeviceTypeCode;
   type: string;
   groupName: string;

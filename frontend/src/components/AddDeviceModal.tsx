@@ -37,20 +37,29 @@ export const AddDeviceModal:
         ];
 
         const handleSubmit = async () => {
-    try {
-      const values = await form.validateFields();
-      setLoading(true);
-      await onAdd(values);
-      message.success('Устройство добавлено');
-      form.resetFields();
-      onCancel();
-    } catch (error) {
-      console.error('Ошибка добавления:', error);
-      message.error('Не удалось добавить устройство');
-    } finally {
-      setLoading(false);
-    }
-  };
+        try {
+            const values = await form.validateFields();
+            setLoading(true);
+
+            const payload = {
+                ...values,
+                ips: Array.isArray(values.ip) ? values.ip : (values.ip ? [values.ip] : [])
+            };
+
+            delete payload.ip;
+            
+            await onAdd(payload);
+            message.success('Устройство добавлено');
+            form.resetFields();
+            onCancel();
+        } catch (error) {
+            console.error('Ошибка добавления:', error);
+            message.error('Не удалось добавить устройство: ' + String(error));
+        } finally {
+            setLoading(false);
+        }
+    };
+
 
   return (
     <Modal

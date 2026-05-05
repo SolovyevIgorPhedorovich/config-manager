@@ -136,10 +136,10 @@ export default function DevicesPage({ type }: { type?: string }) {
     if (statusData.status === 'completed') {
       const newDevices: Device[] = statusData.devices || [];
       setDevices(prev => {
-        const existingIps = new Set(prev.map(d => d.ip));
+        const existingIps = new Set(prev.map(d => d.ips));
         return [
           ...prev,
-          ...newDevices.filter(d => !existingIps.has(d.ip))
+          ...newDevices.filter(d => !existingIps.has(d.ips))
         ];
       });
       message.success(`Найдено и добавлено ${statusData.count} новых устройств`);
@@ -209,7 +209,7 @@ export default function DevicesPage({ type }: { type?: string }) {
         onClose={() => setShowSSH(false)}
         device={{
           hostname: selectedDevice?.hostname || '',
-          ip: selectedDevice?.ip || '',
+          ip: selectedDevice?.ips[0] || '',
         }}
       />
       <ScanDeviceModal

@@ -10,9 +10,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.configmanager.model.AuditLog;
 import com.project.configmanager.model.ConfigVersion;
-import com.project.configmanager.model.Device;
+import com.project.configmanager.model.device.DeviceOutput;
+import com.project.configmanager.model.device.DeviceIP;
+import com.project.configmanager.model.device.DeviceInfo;
 import com.project.configmanager.model.enums.AuditAction;
 import com.project.configmanager.model.enums.ConfigType;
+import com.project.configmanager.model.enums.DeviceType;
 import com.project.configmanager.model.enums.TaskStatus;
 import com.project.configmanager.repository.AuditLogRepository;
 import com.project.configmanager.repository.ConfigVersionRepository;
@@ -40,7 +43,7 @@ public class DeviceService {
     private ObjectMapper mapper;
 
     public void applyConfigToDevice(Long deviceId, String newConfig) {
-        Device device = deviceRepo.findById(deviceId)
+        DeviceInfo device = deviceRepo.findById(deviceId)
             .orElseThrow(() -> new RuntimeException("Device not found"));
 
         // Сохраняем текущую конфигурацию в историю
@@ -71,32 +74,32 @@ public class DeviceService {
         auditLogRepository.save(log);
     }
 
-     public List<Device> getAll() {
+     public List<DeviceInfo> getAll() {
         return deviceRepo.findAll();
     }
 
-    public Device getById(Long id) {
-        Optional<Device> optionalDevice = deviceRepo.findById(id);
+    public DeviceInfo getById(Long id) {
+        Optional<DeviceInfo> optionalDevice = deviceRepo.findById(id);
         return optionalDevice.orElseThrow(() -> 
             new RuntimeException("Устройство с ID " + id + " не найдено"));
     }
 
-    public Device add(Device device) {
+    public DeviceInfo add(DeviceInfo device) {
         if (device.getHostname() == null || device.getHostname().isEmpty()) {
             throw new IllegalArgumentException("Имя хоста (hostname) обязательно");
         }
-        if (device.getIp() == null || !isValidIp(device.getIp().get(0).getIpString())) {
-            throw new IllegalArgumentException("Некорректный IP-адрес: " + device.getIp());
+        if (device.getIps() == null || !isValidIp(device.getIps().get(0).getIp())) {
+            throw new IllegalArgumentException("Некорректный IP-адрес: " + device.getIps().get(0).getIp());
         }
 
         return deviceRepo.save(device);
     }
 
-    public List<Device> addAll(List<Device> devicesList) {
+    public List<DeviceInfo> addAll(List<DeviceInfo> devicesList) {
         return deviceRepo.saveAll(devicesList);
     }
 
-    public Device update(Long id, Device updatedDevice) {
+    public DeviceInfo update(Long id, DeviceInfo updatedDevice) {
         if (!deviceRepo.existsById(id)) {
             throw new RuntimeException("Устройство не найдено");
         }
@@ -115,4 +118,5 @@ public class DeviceService {
     private boolean isValidIp(String ip) {
         return ip != null && ip.matches("^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|25[0-4]|[01]?[0-9][0-9]?)$");
     }
+
 }

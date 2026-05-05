@@ -1,7 +1,11 @@
 package com.project.configmanager.controller;
 
 import com.project.configmanager.model.ConfigVersion;
-import com.project.configmanager.model.Device;
+import com.project.configmanager.model.device.DeviceOutput;
+import com.project.configmanager.model.device.DeviceGroup;
+import com.project.configmanager.model.device.DeviceIP;
+import com.project.configmanager.model.device.DeviceInfo;
+import com.project.configmanager.model.device.DeviceInput;
 import com.project.configmanager.service.DeviceService;
 import com.project.configmanager.service.NetworkScannerService;
 
@@ -20,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DeviceController {
 
     private final DeviceService deviceService;
-    private final ConcurrentHashMap<String, List<Device>> scanResultsCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, List<DeviceInfo>> scanResultsCache = new ConcurrentHashMap<>();
     
     @Autowired
     NetworkScannerService netScanService;
@@ -30,17 +34,51 @@ public class DeviceController {
     }
 
     @GetMapping("/devices")
-    public List<Device> getAll() {
+    public List<DeviceInfo> getAll() {
         return deviceService.getAll();
     }
 
     @PostMapping("/devices")
-    public Device add(@RequestBody Device device) {
-        return deviceService.add(device);
+    public ResponseEntity<DeviceOutput> add(@RequestBody DeviceInput input) {
+        var device = new DeviceInfo();
+        var deviceGroup = new DeviceGroup();
+
+        deviceGroup.setName(input.groupName());
+        
+        device.setHostname(input.hostname());
+        if (input.typeCode() != null) {
+            device.setTypeCode(input.typeCode());
+        }
+
+        var ipsList = input.ip();
+        if (ipsList == null || ipsList.isEmpty()) {
+            throw new IllegalArgumentException("IP-адрес обязателен");
+        }
+
+        for (String ip : ipsList) {
+            if (ip == null || ip.trim().isEmpty()) continue;
+            var dpi = new DeviceIP();
+            dpi.setDevice(device);
+            dpi.setIp(ip);
+            device.getIps().add(dpi);
+        }
+
+        if (input.groupName() != null) {
+            device.setGroup(deviceGroup);
+        }
+        if (input.isActive() != null) {
+            device.setIsActive(input.isActive());
+        }
+        // osVersionId, type 
+
+        var saved = deviceService.add(device);
+        return ResponseEntity.ok(toOutput(saved));
     }
 
+
+
     @GetMapping("/devices/{id}")
-    public Device getById(@PathVariable Long id) {
+    public DeviceInfo getById(@PathVariable Long id) {
         return deviceService.getById(id);
     }
 
@@ -59,7 +97,7 @@ public class DeviceController {
 
         String taskId = java.util.UUID.randomUUID().toString();
 
-        CompletableFuture<List<Device>> scanFuture = netScanService.scanAsync(ipaddr, mask, port, community, snmpVersion)
+        CompletableFuture<List<DeviceInfo>> scanFuture = netScanService.scanAsync(ipaddr, mask, port, community, snmpVersion)
             .thenApply(devices -> {
                 scanResultsCache.put(taskId, devices);
                 return devices;
@@ -77,7 +115,7 @@ public class DeviceController {
     public ResponseEntity<Map<String, Object>> getScanStatus(
             @RequestParam("taskId") String taskId) {
 
-        List<Device> devices = scanResultsCache.get(taskId);
+        List<DeviceInfo> devices = scanResultsCache.get(taskId);
 
         if (devices == null) {
             return ResponseEntity.ok(Map.of(
@@ -105,4 +143,27 @@ public class DeviceController {
     @GetMapping("/devices/{id}/history")
     public List<ConfigVersion> getHistory(@PathVariable Long id) {
         return java.util.Collections.emptyList();    }
+
+
+    private DeviceOutput toOutput(com.project.configmanager.model.device.DeviceInfo info) {
+        List<String> ips = info.getIps() != null ?
+            info.getIps().stream()
+                 .map(deviceIp -> deviceIp.getIp())
+                 .toList() :
+            List.of();
+
+        return new DeviceOutput(
+            info.getId(),
+            info.getHostname(),
+            ips,
+            // typeCodeName — если у вас есть enum DeviceType:
+            java.util.Optional.ofNullable(info.getTypeCode())
+                .map(com.project.configmanager.model.enums.DeviceType::fromCode)
+                .map(com.project.configmanager.model.enums.DeviceType::getString)
+                .orElse("Unknown"),
+            info.getOsVersionString(),
+            info.getGroupName(),
+            info.getIsActive()
+        );
+    }
 }

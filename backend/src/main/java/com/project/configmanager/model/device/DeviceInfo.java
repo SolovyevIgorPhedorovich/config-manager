@@ -1,4 +1,4 @@
-package com.project.configmanager.model;
+package com.project.configmanager.model.device;
 
 import jakarta.persistence.*;
 import lombok.*;
@@ -13,13 +13,13 @@ import com.fasterxml.jackson.annotation.JsonSubTypes.Type;
 import com.project.configmanager.model.enums.DeviceType;
 
 @Entity
-@Table(name = "devices_info")
+@Table(name = "device_info")
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 @Getter
 @Setter
-public class Device {
+public class DeviceInfo {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -29,16 +29,18 @@ public class Device {
     private String hostname;
 
     @OneToMany(mappedBy = "device", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private List<DeviceIP> ip = new ArrayList<>();
+    private List<DeviceIP> ips = new ArrayList<>();
 
     @Column(name = "type", nullable = false)
     private Integer typeCode;
 
-    @Column(name = "group_name", length = 255, columnDefinition = "DEFAULT 'default'")
-    private String groupName;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "group_id", nullable = false)
+    private DeviceGroup group;
 
-    @Column(name = "os_version")
-    private String osVersion;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "os_version_id")
+    private DeviceOS osVersion;
 
     @Column(name = "is_active")
     private Boolean isActive = true;
@@ -55,6 +57,16 @@ public class Device {
     }
 
     public void setIp(DeviceIP ip) {
-        this.ip.add(ip);
+        this.ips.add(ip);
+    }
+
+    public String getOsVersionString() {
+        return osVersion != null ? 
+            String.format("%s %d.%d", osVersion.getName(), 
+                osVersion.getMajorVersion(), osVersion.getMinorVersion()) : "Unknown";
+    }
+
+    public String getGroupName() {
+        return group != null ? group.getName() : "default";
     }
 }

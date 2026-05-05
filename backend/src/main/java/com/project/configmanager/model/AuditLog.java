@@ -1,5 +1,6 @@
 package com.project.configmanager.model;
 
+import com.project.configmanager.model.device.DeviceInfo;
 import com.project.configmanager.model.enums.AuditAction;
 import com.project.configmanager.model.enums.TaskStatus;
 
@@ -33,7 +34,7 @@ public class AuditLog {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "target_device_id")
-    private Device targetDevice;
+    private DeviceInfo targetDevice;
 
     @Column(name = "old_config", columnDefinition = "TEXT")
     private String oldConfig;

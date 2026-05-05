@@ -1,6 +1,7 @@
 package com.project.configmanager.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.project.configmanager.model.device.DeviceInfo;
 import com.project.configmanager.model.enums.ConfigType;
 
 import jakarta.persistence.*;
@@ -26,7 +27,7 @@ public class ConfigVersion {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "device_id", nullable = false)
-    private Device device;
+    private DeviceInfo device;
 
     @Column(name = "config_type", nullable = false)
     private int configTypeCode;

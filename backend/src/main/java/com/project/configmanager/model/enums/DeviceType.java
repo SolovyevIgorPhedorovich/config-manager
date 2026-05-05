@@ -19,6 +19,10 @@ public enum DeviceType implements CodeEnum {
         return code;
     }
 
+    public String getString() {
+        return this.toString();
+    }
+
     public static DeviceType fromCode(int code) {
         for (DeviceType type : values()) {
             if (type.code == code) {
