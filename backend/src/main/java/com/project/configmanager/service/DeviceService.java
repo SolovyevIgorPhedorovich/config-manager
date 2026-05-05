@@ -85,7 +85,7 @@ public class DeviceService {
         if (device.getHostname() == null || device.getHostname().isEmpty()) {
             throw new IllegalArgumentException("Имя хоста (hostname) обязательно");
         }
-        if (device.getIp() == null || !isValidIp(device.getIp())) {
+        if (device.getIp() == null || !isValidIp(device.getIp().get(0).getIpString())) {
             throw new IllegalArgumentException("Некорректный IP-адрес: " + device.getIp());
         }
 

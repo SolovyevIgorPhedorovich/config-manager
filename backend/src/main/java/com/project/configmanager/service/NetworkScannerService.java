@@ -12,6 +12,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import com.project.configmanager.model.Device;
+import com.project.configmanager.model.DeviceIP;
 import com.project.configmanager.repository.DeviceRepository;
 
 import java.net.InetAddress;
@@ -75,17 +76,16 @@ public class NetworkScannerService {
                         byte[] netAddr = getNetworkAddressBytes(addr, mask);
                         byte[] brdAddr = getBroadcastAddressBytes(addr, mask);
 
-                        if (InetAddress.getByAddress(netAddr).equals(addr)) continue; // сетевой адрес
-                        if (InetAddress.getByAddress(brdAddr).equals(addr)) continue; // broadcast
+                        if (InetAddress.getByAddress(netAddr).equals(addr)) continue; 
+                        if (InetAddress.getByAddress(brdAddr).equals(addr)) continue;
                     } catch (Exception e) {
-                        // Пропускаем ошибки IP-адресов
                     }
                 }
 
                 futures.add(CompletableFuture.runAsync(() -> {
                     try {
                         Device device = probeDevice(ipStr, port, community, snmpVersion);
-                        if (device != null && !deviceRepo.existsByIp(device.getIp())) {
+                        if (device != null && !deviceRepo.existsByIp(device.getIp().get(0).getIpString())) {
                             synchronized (foundDevices) {
                                 foundDevices.add(device);
                             }
@@ -129,7 +129,8 @@ public class NetworkScannerService {
             switch (version) {
                 case "v1": target.setVersion(SnmpConstants.version1); break;
                 case "v2c": target.setVersion(SnmpConstants.version2c); break;
-                default: throw new IllegalArgumentException("Поддерживаемые версии SNMP: v1, v2c");
+                case "v3": target.setVersion(SnmpConstants.version3); break;
+                default: throw new IllegalArgumentException("Поддерживаемые версии SNMP: v1, v2c, v3");
             }
 
             PDU pdu = new PDU();
@@ -147,8 +148,11 @@ public class NetworkScannerService {
                 if (hostname == null || hostname.trim().isEmpty()) return null;
 
                 Device device = new Device();
+                DeviceIP deviceIP = new DeviceIP();
+                deviceIP.setDevice(device);
+                deviceIP.setIp(ip);
                 device.setHostname(hostname.trim());
-                device.setIp(ip);
+                device.setIp(deviceIP);
                 device.setTypeCode(detectDeviceType(osVersion));
                 device.setGroupName("Скан: " + ip);
                 device.setOsVersion(osVersion != null ? osVersion : "Unknown");

@@ -3,12 +3,17 @@ package com.project.configmanager.model;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonSubTypes.Type;
 import com.project.configmanager.model.enums.DeviceType;
 
 @Entity
-@Table(name = "devices")
+@Table(name = "devices_info")
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -23,8 +28,8 @@ public class Device {
     @Column(nullable = false, unique = true)
     private String hostname;
 
-    @Column(name = "ip", nullable = false, columnDefinition = "INET")
-    private String ip;
+    @OneToMany(mappedBy = "device", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<DeviceIP> ip = new ArrayList<>();
 
     @Column(name = "type", nullable = false)
     private Integer typeCode;
@@ -49,11 +54,7 @@ public class Device {
         this.typeCode = type.getCode();
     }
 
-    public String getIpAsString() {
-        return this.ip;
-    }
-
-    public void setIp(String ip) {
-        this.ip = ip;
+    public void setIp(DeviceIP ip) {
+        this.ip.add(ip);
     }
 }
