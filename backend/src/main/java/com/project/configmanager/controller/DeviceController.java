@@ -2,6 +2,7 @@ package com.project.configmanager.controller;
 
 import com.project.configmanager.model.ConfigVersion;
 import com.project.configmanager.model.device.DeviceOutput;
+import com.project.configmanager.repository.DeviceGroupRepository;
 import com.project.configmanager.model.device.DeviceGroup;
 import com.project.configmanager.model.device.DeviceIP;
 import com.project.configmanager.model.device.DeviceInfo;
@@ -40,27 +41,15 @@ public class DeviceController {
 
     @PostMapping("/devices")
     public ResponseEntity<DeviceOutput> add(@RequestBody DeviceInput input) {
+
         var device = new DeviceInfo();
         var deviceGroup = new DeviceGroup();
 
-        deviceGroup.setName(input.groupName());
+         DeviceGroup group = deviceService.add(input);
         
         device.setHostname(input.hostname());
-        if (input.typeCode() != null) {
-            device.setTypeCode(input.typeCode());
-        }
-
-        var ipsList = input.ip();
-        if (ipsList == null || ipsList.isEmpty()) {
-            throw new IllegalArgumentException("IP-адрес обязателен");
-        }
-
-        for (String ip : ipsList) {
-            if (ip == null || ip.trim().isEmpty()) continue;
-            var dpi = new DeviceIP();
-            dpi.setDevice(device);
-            dpi.setIp(ip);
-            device.getIps().add(dpi);
+        if (input.type() != null) {
+            device.setTypeCode(input.type());
         }
 
         if (input.groupName() != null) {
@@ -69,6 +58,20 @@ public class DeviceController {
         if (input.isActive() != null) {
             device.setIsActive(input.isActive());
         }
+
+        var ipsList = input.ips();
+        if (ipsList == null || ipsList.isEmpty()) {
+            throw new IllegalArgumentException("IP-адрес обязателен");
+        }
+
+        for (String ip : ipsList) {
+            if (ip == null || ip.trim().isEmpty()) continue;
+            var dpi = new DeviceIP();
+            dpi.setDevice(device);
+            // dpi.setIp(ip);
+            device.getIps().add(dpi);
+        }
+
         // osVersionId, type 
 
         var saved = deviceService.add(device);

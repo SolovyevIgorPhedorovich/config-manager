@@ -7,8 +7,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 public record DeviceInput(
     String hostname,
     //@JsonProperty("ip")
-    List<String> ip,
-    Integer typeCode,
+    List<String> ips,
+    Integer type,
     Long osVersionId,
     String groupName,
     Boolean isActive
