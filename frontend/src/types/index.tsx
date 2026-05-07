@@ -49,3 +49,13 @@ export interface AuditLog {
   status: 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED';
   createdAt?: string;
 }
+
+export interface Settings {
+  apiUrl: string;
+  autoRefreshInterval: number;
+  enableNotifications: boolean;
+  adEnabled: boolean;
+  adUrl: string;
+  adBaseDn: string;
+  adUserSearchFilter: string;
+}

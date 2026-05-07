@@ -1,12 +1,12 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import AppWithNavigation from './components/AppWithNavigation.tsx'
+import { AppRoutes } from './AppRoutes.tsx'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <AppWithNavigation/>
+      <AppRoutes/>
     </BrowserRouter>
   </React.StrictMode>,
   

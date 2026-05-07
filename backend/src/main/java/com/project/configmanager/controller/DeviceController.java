@@ -7,6 +7,7 @@ import com.project.configmanager.model.device.DeviceGroup;
 import com.project.configmanager.model.device.DeviceIP;
 import com.project.configmanager.model.device.DeviceInfo;
 import com.project.configmanager.model.device.DeviceInput;
+import com.project.configmanager.model.device.DeviceOS;
 import com.project.configmanager.service.DeviceService;
 import com.project.configmanager.service.NetworkScannerService;
 
@@ -43,18 +44,18 @@ public class DeviceController {
     public ResponseEntity<DeviceOutput> add(@RequestBody DeviceInput input) {
 
         var device = new DeviceInfo();
-        var deviceGroup = new DeviceGroup();
 
-         DeviceGroup group = deviceService.add(input);
+        if (input.groupName() != null && input.groupName().strip().length() != 0) {
+            DeviceGroup deviceGroup = new DeviceGroup();
+            deviceGroup = deviceService.add(input);
+            device.setGroup(deviceGroup);
+        }
         
         device.setHostname(input.hostname());
         if (input.type() != null) {
             device.setTypeCode(input.type());
         }
 
-        if (input.groupName() != null) {
-            device.setGroup(deviceGroup);
-        }
         if (input.isActive() != null) {
             device.setIsActive(input.isActive());
         }
@@ -72,7 +73,9 @@ public class DeviceController {
             device.getIps().add(dpi);
         }
 
-        // osVersionId, type 
+//        device.setOsVersion(input.osVersionId());
+
+        
 
         var saved = deviceService.add(device);
         return ResponseEntity.ok(toOutput(saved));
