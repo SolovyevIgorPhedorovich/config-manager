@@ -225,3 +225,5 @@ export default function DevicesPage({ type }: { type?: string }) {
     </>
   );
 }
+
+
