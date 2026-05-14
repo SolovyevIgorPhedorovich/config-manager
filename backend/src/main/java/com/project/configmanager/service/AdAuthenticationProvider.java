@@ -2,28 +2,23 @@ package com.project.configmanager.service;
 
 import lombok.Data;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.ldap.AuthenticationException;
-import org.springframework.ldap.core.DirContextOperations;
 import org.springframework.ldap.core.LdapTemplate;
-import org.springframework.ldap.core.support.AbstractContextMapper;
 import org.springframework.ldap.core.support.LdapContextSource;
-import org.springframework.ldap.filter.EqualsFilter;
 import org.springframework.ldap.query.LdapQuery;
 import org.springframework.ldap.query.LdapQueryBuilder;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
-import javax.naming.Context;
-import javax.naming.directory.DirContext;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Component
 @Data
@@ -58,7 +53,16 @@ public class AdAuthenticationProvider implements org.springframework.security.au
     public Authentication authenticate(Authentication authentication) throws AuthenticationException {
         String username = authentication.getName();
         String password = (String) authentication.getCredentials();
+        String authType = resolveAuthType();
 
+        if ("AD".equalsIgnoreCase(authType) && adEnabled) {
+            return authenticateUsingAd(username, password);
+        }
+
+        return authenticateUsingDatabase(username, password);
+    }
+
+    private Authentication authenticateUsingDatabase(String username, String password) {
         try {
             UserDetails localUser = userDetailsService.loadUserByUsername(username);
             if (localUser != null && passwordEncoder().matches(password, localUser.getPassword())) {
@@ -68,41 +72,49 @@ public class AdAuthenticationProvider implements org.springframework.security.au
                     localUser.getAuthorities()
                 );
             }
-        } catch (UsernameNotFoundException ignored) {}
-
-/*/        if (adEnabled && ldapTemplate != null) {
-            try {
-                LdapQuery query = LdapQueryBuilder.query()
-                    .base(baseDn)
-                    .filter(userSearchFilter.replace("{0}", username));
-                    
-               DirContextOperations ctx = ldapTemplate.authenticate(query, password);
-
-                String userDn = ctx.getNameInNamespace();
-                List<String> groups = getGroupsForUser(username);
-                var authorities = groups.stream()
-                    .map(g -> new SimpleGrantedAuthority("ROLE_" + g.toUpperCase()))
-                    .collect(Collectors.toList());
-
-                UserDetails adUser = new org.springframework.security.core.userdetails.User(
-                    username, password,
-                    true, true, true, true,
-                    authorities
-                );
-
-                return new UsernamePasswordAuthenticationToken(adUser, password, authorities);
-
-            } catch (AuthenticationException e) {
-                throw new BadCredentialsException("AD Authentication failed");
-            }
-        }*/
+        } catch (UsernameNotFoundException ignored) {
+            // continue to unified error below
+        }
 
         throw new BadCredentialsException("Invalid credentials");
     }
 
-    private List<String> getGroupsForUser(String username) {
-        return Collections.emptyList(); 
+    private Authentication authenticateUsingAd(String username, String password) {
+        try {
+            LdapQuery query = LdapQueryBuilder.query()
+                .base(baseDn)
+                .filter(userSearchFilter.replace("{0}", username));
+
+            boolean isAuthenticated = ldapTemplate.authenticate(query, password);
+            if (!isAuthenticated) {
+                throw new BadCredentialsException("AD Authentication failed");
+            }
+
+            UserDetails adUser = new org.springframework.security.core.userdetails.User(
+                username,
+                password,
+                Collections.emptyList()
+            );
+
+            return new UsernamePasswordAuthenticationToken(adUser, password, adUser.getAuthorities());
+        } catch (org.springframework.ldap.AuthenticationException ex) {
+            throw new BadCredentialsException("AD Authentication failed");
+        }
     }
+
+    private String resolveAuthType() {
+        ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        if (attrs == null) {
+            return "DB";
+        }
+
+        String authType = attrs.getRequest().getHeader("X-Auth-Type");
+        if (authType == null || authType.isBlank()) {
+            authType = attrs.getRequest().getParameter("authType");
+        }
+        return authType == null || authType.isBlank() ? "DB" : authType;
+    }
+
 
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder() {
         return new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder();
