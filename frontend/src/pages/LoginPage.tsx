@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Form, Input, Button, message } from 'antd';
+import { Form, Input, Button, Select, message } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 export default function LoginPage() {
@@ -18,7 +18,8 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           username: values.username,
-          password: values.password
+          password: values.password,
+          authType: values.authType
         }),
         credentials: 'include'
       });
@@ -55,6 +56,21 @@ export default function LoginPage() {
           rules={[{ required: true }]}
         >
           <Input.Password placeholder="••••••" />
+        </Form.Item>
+
+
+        <Form.Item
+          name="authType"
+          label="Способ авторизации"
+          initialValue="DB"
+          rules={[{ required: true }]}
+        >
+          <Select
+            options={[
+              { value: "DB", label: "База данных" },
+              { value: "AD", label: "AD / LDAP" }
+            ]}
+          />
         </Form.Item>
 
         <Button
