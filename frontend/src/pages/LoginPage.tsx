@@ -13,10 +13,10 @@ export default function LoginPage() {
   const handleLogin = async (values: any) => {
     try {
       setLoading(true);
-      const res = await fetch('http://localhost:8080/login', {
+      const res = await fetch('http://localhost:8080/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Type': values.authType },
+        body: JSON.stringify({
           username: values.username,
           password: values.password,
           authType: values.authType

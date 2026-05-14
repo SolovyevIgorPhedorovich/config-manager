@@ -108,7 +108,10 @@ public class AdAuthenticationProvider implements org.springframework.security.au
             return "DB";
         }
 
-        String authType = attrs.getRequest().getParameter("authType");
+        String authType = attrs.getRequest().getHeader("X-Auth-Type");
+        if (authType == null || authType.isBlank()) {
+            authType = attrs.getRequest().getParameter("authType");
+        }
         return authType == null || authType.isBlank() ? "DB" : authType;
     }
 
