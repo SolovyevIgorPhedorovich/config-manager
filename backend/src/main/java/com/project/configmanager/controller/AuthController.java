@@ -54,9 +54,13 @@ public class AuthController {
     }
 
     @GetMapping("/user")
-    public String getUser(Authentication authentication) {
-        return authentication.getName();
-    }
+    public ResponseEntity<String> getUser(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Unauthorized");
+        }
+
+        return ResponseEntity.ok(authentication.getName());
+} 
 
     @Data
     public static class LoginRequest {
