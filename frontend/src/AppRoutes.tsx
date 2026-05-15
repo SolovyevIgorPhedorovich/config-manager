@@ -6,7 +6,7 @@ import LoginPage from './pages/LoginPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 const isAuthenticated = () => {
-  return document.cookie.includes('JSESSIONID'); // заменить на куки/токены
+  return !!localStorage.getItem('token');
 };
 
 export const AppRoutes = () => {

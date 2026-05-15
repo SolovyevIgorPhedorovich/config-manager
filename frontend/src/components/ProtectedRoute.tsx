@@ -11,10 +11,12 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
 
   useEffect(() => {
     const checkAuth = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) {setIsAuthenticated(false); return}
       try {
         const response = await fetch('http://localhost:8080/api/auth/user', {
           method: 'GET',
-          credentials: 'include'
+          headers: {'Authorization': `Bearer ${token}` }
         });
         setIsAuthenticated(response.ok);
       } catch {

@@ -25,6 +25,8 @@ export default function LoginPage() {
       });
 
       if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('token', data.token);
         message.success('Вход выполнен!');
         navigate(from, { replace: true });
       } else {
