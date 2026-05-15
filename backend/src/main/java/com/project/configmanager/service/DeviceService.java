@@ -6,25 +6,17 @@ import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.configmanager.model.AuditLog;
 import com.project.configmanager.model.ConfigVersion;
-import com.project.configmanager.model.device.DeviceOutput;
 import com.project.configmanager.model.device.DeviceGroup;
-import com.project.configmanager.model.device.DeviceIP;
 import com.project.configmanager.model.device.DeviceInfo;
 import com.project.configmanager.model.device.DeviceInput;
 import com.project.configmanager.model.enums.AuditAction;
-import com.project.configmanager.model.enums.ConfigType;
-import com.project.configmanager.model.enums.DeviceType;
-import com.project.configmanager.model.enums.TaskStatus;
 import com.project.configmanager.repository.AuditLogRepository;
 import com.project.configmanager.repository.ConfigVersionRepository;
 import com.project.configmanager.repository.DeviceGroupRepository;
 import com.project.configmanager.repository.DeviceRepository;
-
-import jakarta.transaction.Transactional;
 
 @Service
 public class DeviceService {
