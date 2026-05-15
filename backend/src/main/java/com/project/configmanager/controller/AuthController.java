@@ -9,6 +9,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -33,8 +34,21 @@ public class AuthController {
     }
 
     @GetMapping("/user")
-    public String getUser(@RequestHeader("Authorization") String authHeader) {
-        return "admin";
+    public ResponseEntity<String> getUser(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        Object principal = authentication.getPrincipal();
+        if (principal instanceof UserDetails userDetails) {
+            return ResponseEntity.ok(userDetails.getUsername());
+        }
+
+        if (principal instanceof String username && !"anonymousUser".equals(username)) {
+            return ResponseEntity.ok(username);
+        }
+
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
     }
 
     @Data

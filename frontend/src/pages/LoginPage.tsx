@@ -8,7 +8,7 @@ export default function LoginPage() {
   const location = useLocation();
   const [form] = Form.useForm(); 
 
-  const from = (location.state as any)?.from?.pathname || '/dashboard';
+  const from = (location.state as any)?.from?.pathname || '/';
 
   const handleLogin = async (values: any) => {
     try {
