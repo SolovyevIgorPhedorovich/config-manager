@@ -18,18 +18,14 @@ export const AppRoutes = () => {
       
       <Route path="/" element={
       <ProtectedRoute>
-        <DashboardPage />
-      </ProtectedRoute>
-    } />
-
-    <Route path="/devices/:type" element={
-      <ProtectedRoute>
         <AppWithNavigation />
       </ProtectedRoute>
     } />
 
       <Route path="/devices/:type" element={
-        <AppWithNavigation/>
+        <ProtectedRoute>
+          <AppWithNavigation />
+        </ProtectedRoute>
       } />
 
       <Route path="*" element={<Navigate to="/login" replace />} />

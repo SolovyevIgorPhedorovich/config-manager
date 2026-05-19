@@ -25,7 +25,6 @@ export default function AdminPage() {
   const handleSubmit = async (values: any) => {
     try {
       setLoading(true);
-      // TODO: сохранить настройки (API)
       await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

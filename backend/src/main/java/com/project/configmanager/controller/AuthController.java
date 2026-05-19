@@ -51,6 +51,9 @@ public class AuthController {
         return ResponseEntity.ok(authentication.getName());
     }
 
+  
+    
+
     @Data
     public static class LoginRequest {
         private String username;
