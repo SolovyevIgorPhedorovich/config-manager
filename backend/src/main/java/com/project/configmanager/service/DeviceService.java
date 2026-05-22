@@ -107,11 +107,31 @@ public class DeviceService {
     }
 
     public DeviceInfo update(Long id, DeviceInfo updatedDevice) {
-        if (!deviceRepo.existsById(id)) {
-            throw new RuntimeException("Устройство не найдено");
+       DeviceInfo existing = deviceRepo.findById(id)
+            .orElseThrow(() -> new RuntimeException("Устройство не найдено"));
+
+        existing.setHostname(updatedDevice.getHostname());
+        existing.setTypeCode(updatedDevice.getTypeCode());
+        existing.setGroup(updatedDevice.getGroup());
+        existing.setOsVersion(updatedDevice.getOsVersion());
+        existing.setIsActive(updatedDevice.getIsActive());
+
+        if (updatedDevice.getIps() != null && !updatedDevice.getIps().isEmpty()) {
+            existing.getIps().clear();
+            for (int i = 0; i < updatedDevice.getIps().size(); i++) {
+                var newIp = updatedDevice.getIps().get(i);
+                if (newIp == null || newIp.getIp() == null || newIp.getIp().trim().isEmpty()) {
+                    continue;
+                }
+                var ip = new com.project.configmanager.model.device.DeviceIP();
+                ip.setDevice(existing);
+                ip.setIp(newIp.getIp().trim());
+                ip.setIfName(newIp.getIfName());
+                ip.setIsPrimary(i == 0);
+                existing.getIps().add(ip);
+            }
         }
-        updatedDevice.setId(id);
-        return deviceRepo.save(updatedDevice);
+        return deviceRepo.save(existing);
     }
 
     public void delete(Long id) {

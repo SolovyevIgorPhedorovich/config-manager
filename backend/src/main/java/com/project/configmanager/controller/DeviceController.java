@@ -36,9 +36,12 @@ public class DeviceController {
     }
 
     @GetMapping("/devices")
-    public List<DeviceInfo> getAll() {
-        return deviceService.getAll();
+    public List<DeviceOutput> getAll() {
+        return deviceService.getAll().stream()
+                .map(this::toOutput)
+                .toList();
     }
+
 
     @PostMapping("/devices")
     public ResponseEntity<DeviceOutput> add(@RequestBody DeviceInput input) {
@@ -69,7 +72,8 @@ public class DeviceController {
             if (ip == null || ip.trim().isEmpty()) continue;
             var dpi = new DeviceIP();
             dpi.setDevice(device);
-            // dpi.setIp(ip);
+            dpi.setIp(ip.trim());
+            dpi.setIsPrimary(device.getIps().isEmpty());
             device.getIps().add(dpi);
         }
 
@@ -84,8 +88,8 @@ public class DeviceController {
 
 
     @GetMapping("/devices/{id}")
-    public DeviceInfo getById(@PathVariable Long id) {
-        return deviceService.getById(id);
+    public DeviceOutput getById(@PathVariable Long id) {
+        return toOutput(deviceService.getById(id));
     }
 
     @GetMapping("/devices/scan")
@@ -139,7 +143,7 @@ public class DeviceController {
     }
     
 
-    @PostMapping("/devices/{id}/deploy")
+    @RequestMapping(value = "/devices/{id}/deploy", method = {RequestMethod.POST, RequestMethod.PUT})
     public ResponseEntity<String> deployConfig(
             @PathVariable Long id,
             @RequestBody(required = false) String configJson) {

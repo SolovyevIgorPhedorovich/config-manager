@@ -6,7 +6,7 @@ public record DeviceOutput(
     Long id,
     String hostname,
     List<String> ips,
-    String typeCodeName,
+    String type,
     String osVersion,
     String groupName,
     Boolean isActive

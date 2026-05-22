@@ -3,22 +3,26 @@ import { Card, Table, Space, Button, Tag, Empty, message, Tabs, AutoComplete, Da
 import { devicesApi } from '../api/devicesApi';
 import type { Device } from '../types';
 import SSHClient from '../components/SSHClient';
-import { CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined } from "@ant-design/icons"
+import { CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined } from "@ant-design/icons"
 import { ScanDeviceModal } from '../components/ScanDeviceModal';
 import { AddDeviceModal } from '../components/AddDeviceModal';
 import { ScanOption } from "../types"
 import { ScanProgress } from '../components/ScanProgress';
 import { ColumnsType } from 'antd/es/table';
+import ConfigLinuxModal from '../components/ConfigLinuxModal';
+import ConfigWindowsModal from '../components/ConfigWindowsModal';
+import ConfigMFUModal from '../components/ConfigMFUModal';
+import ConfigCiscoModal from '../components/ConfigCiscoModal';
 
 
 const { Text, Paragraph } = Typography;
 
 
 const deviceTypeInfo: Record<string, { name: string; color: string }> = {
-  windows: { name: 'ПК', color: '#1890ff' },
-  mfu: { name: 'МФУ', color: '#52c41a' },
-  cisco: { name: 'Cisco', color: '#fa8b0f' },
-  vm: { name: 'VM', color: '#f53f3f' },
+  ПК: { name: 'ПК', color: '#1890ff' },
+  МФУ: { name: 'МФУ', color: '#52c41a' },
+  CISCO: { name: 'Cisco', color: '#fa8b0f' },
+  VM: { name: 'VM', color: '#f53f3f' },
 };
 
 type DeviceRuntimeStatus = 'online' | 'offline' | 'error';
@@ -34,6 +38,10 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [terminalCommand, setTerminalCommand] = useState('');
+  const [linuxModalOpen, setLinuxModalOpen] = useState(false);
+  const [windowsModalOpen, setWindowsModalOpen] = useState(false);
+  const [mfuModalOpen, setMfuModalOpen] = useState(false);
+  const [ciscoModalOpen, setCiscoModalOpen] = useState(false);
 
   useEffect(() => {
     loadDevices();
@@ -132,6 +140,15 @@ export default function DevicesPage({ type }: { type?: string }) {
     result: idx % 3 === 0 ? 'Ошибка' : 'Успех',
     deviceType: Object.keys(deviceTypeInfo)[d.typeCode] || 'windows',
   }));
+
+  const openConfigModalByType = () => {
+    const typeCode = selectedDevice?.typeCode;
+    if (typeCode === 2) return setCiscoModalOpen(true);
+    if (typeCode === 1) return setMfuModalOpen(true);
+    if (typeCode === 0) return setWindowsModalOpen(true);
+    if (typeCode === 3) return setLinuxModalOpen(true);
+    message.info('Выберите устройиство из списка');
+  };
 
   const handleScan = async (options: any) => {
   setShowScan(false);
@@ -269,6 +286,7 @@ export default function DevicesPage({ type }: { type?: string }) {
                   ]}
                 />
                 <Space>
+                  <Button type="primary" icon={<EditOutlined />}>Редактировать конфиграцию</Button>
                   <Button icon={<ReloadOutlined />}>Откатить</Button>
                   <Button type="primary" icon={<FileDoneOutlined />}>Применить шаблон</Button>
                   <Button icon={<DownloadOutlined />}>Выгрузить</Button>
@@ -329,6 +347,10 @@ export default function DevicesPage({ type }: { type?: string }) {
         onCancel={() => setShowAddDevice(false)}
         onAdd={handleAddDevice}
       />
+      <ConfigLinuxModal open={linuxModalOpen} onClose={() => setLinuxModalOpen(false)} hostname={selectedDevice?.hostname} />
+      <ConfigWindowsModal open={windowsModalOpen} onClose={() => setWindowsModalOpen(false)} hostname={selectedDevice?.hostname} />
+      <ConfigMFUModal open={mfuModalOpen} onClose={() => setMfuModalOpen(false)} hostname={selectedDevice?.hostname} />
+      <ConfigCiscoModal open={ciscoModalOpen} onClose={() => setCiscoModalOpen(false)} hostname={selectedDevice?.hostname} />
     </>
   );
 }
