@@ -18,11 +18,19 @@ import ConfigCiscoModal from '../components/ConfigCiscoModal';
 const { Text, Paragraph } = Typography;
 
 
-const deviceTypeInfo: Record<string, { name: string; color: string }> = {
-  ПК: { name: 'ПК', color: '#1890ff' },
-  МФУ: { name: 'МФУ', color: '#52c41a' },
-  CISCO: { name: 'Cisco', color: '#fa8b0f' },
-  VM: { name: 'VM', color: '#f53f3f' },
+const deviceTypeInfo: Record<string, { name: string; color: string; code: number }> = {
+  ПК: { name: 'ПК', color: '#1890ff', code: 0 },
+  МФУ: { name: 'МФУ', color: '#52c41a', code: 1 },
+  CISCO: { name: 'Cisco', color: '#fa8b0f', code: 2 },
+  VM: { name: 'VM', color: '#f53f3f', code: 3 },
+};
+
+const routeTypeMap: Record<string, keyof typeof deviceTypeInfo> = {
+  windows: 'ПК',
+  pc: 'ПК',
+  mfu: 'МФУ',
+  cisco: 'CISCO',
+  vm: 'VM',
 };
 
 type DeviceRuntimeStatus = 'online' | 'offline' | 'error';
@@ -59,9 +67,12 @@ export default function DevicesPage({ type }: { type?: string }) {
     try {
       const res = await devicesApi.getAll();
 
-      if (type && type in deviceTypeInfo) {
-        const typeId = Object.keys(deviceTypeInfo).indexOf(type);
-        setDevices(res.data.filter(d => d.typeCode === typeId));
+      const mappedType = type ? routeTypeMap[type] : undefined;
+
+      if (mappedType) {
+        const expectedCode = deviceTypeInfo[mappedType].code;
+        setDevices(res.data.filter((d) => d.type === mappedType || d.typeCode === expectedCode));
+
       } else {
         setDevices(res.data);
       }
@@ -85,8 +96,8 @@ export default function DevicesPage({ type }: { type?: string }) {
       title: 'Тип',
       key: 'type',
       render: (_, record) => {
-        const typeName = Object.keys(deviceTypeInfo)[record.typeCode] || 'unknown';
-        return <Tag color={deviceTypeInfo[typeName]?.color || '#999'}>{deviceTypeInfo[typeName]?.name || 'Неизвестно'}</Tag>;
+        const typeName = record.type || Object.keys(deviceTypeInfo)[record.typeCode];
+        return <Tag color={deviceTypeInfo[typeName]?.color || '#999'}>{deviceTypeInfo[typeName]?.name || typeName || 'Неизвестно'}</Tag>;
       },
     },
     {
@@ -107,6 +118,7 @@ export default function DevicesPage({ type }: { type?: string }) {
       key: 'actions',
       render: (_, record) => (
         <Space size="small" wrap>
+          <Button icon={<EditOutlined/>} onClick={() => { setSelectedDevice(record); openConfigModalByType()}}></Button>
           <Button icon={<CodeOutlined />} onClick={() => { setSelectedDevice(record); setShowSSH(true); }}>Конфигурация</Button>
           <Button icon={<ScanOutlined />} onClick={() => message.info(`Инвентаризация запущена для ${record.hostname}`)}>Инвентаризация</Button>
           <Button danger icon={<DeleteOutlined />} onClick={() => handleDelete(record.id)}>Удалить</Button>
@@ -138,7 +150,7 @@ export default function DevicesPage({ type }: { type?: string }) {
     action: ['Создание', 'Изменение', 'Откат', 'Вход'][idx % 4],
     device: d.hostname,
     result: idx % 3 === 0 ? 'Ошибка' : 'Успех',
-    deviceType: Object.keys(deviceTypeInfo)[d.typeCode] || 'windows',
+    deviceType: d.type || Object.keys(deviceTypeInfo)[d.typeCode] || 'ПК',
   }));
 
   const openConfigModalByType = () => {
@@ -226,7 +238,7 @@ export default function DevicesPage({ type }: { type?: string }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <h2>
                   Устройства:
-                  {type ? ` ${deviceTypeInfo[type]?.name}` : ' Всего'} 
+                  {type ? ` ${deviceTypeInfo[routeTypeMap[type]]?.name || routeTypeMap[type] || type}` : ' Всего'} 
                   <span style={{ marginLeft: 16, fontSize: '0.9em', color: '#666' }}>
                     ({devices.length} шт.)
                   </span>

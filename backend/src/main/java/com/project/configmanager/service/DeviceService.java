@@ -99,7 +99,20 @@ public class DeviceService {
             throw new IllegalArgumentException("Некорректный IP-адрес: " + device.getIps().get(0).getIp());
         }
 
-        return deviceRepo.save(device);
+        DeviceInfo saved = deviceRepo.save(device);
+        
+        AuditLog log = AuditLog.builder()
+            .userId("system")
+            .actionType(AuditAction.DEVICE_ADDED)
+            .targetDevice(saved)
+            .oldConfig(null)
+            .newConfig(mapper.convertValue(saved, String.class))
+            .statusValue(1)
+            .build();
+        
+        auditLogRepository.save(log);
+        
+        return saved;
     }
 
     public List<DeviceInfo> addAll(List<DeviceInfo> devicesList) {
@@ -109,6 +122,8 @@ public class DeviceService {
     public DeviceInfo update(Long id, DeviceInfo updatedDevice) {
        DeviceInfo existing = deviceRepo.findById(id)
             .orElseThrow(() -> new RuntimeException("Устройство не найдено"));
+
+        String oldConfig = mapper.convertValue(existing, String.class);
 
         existing.setHostname(updatedDevice.getHostname());
         existing.setTypeCode(updatedDevice.getTypeCode());
@@ -131,15 +146,45 @@ public class DeviceService {
                 existing.getIps().add(ip);
             }
         }
-        return deviceRepo.save(existing);
+        
+        DeviceInfo saved = deviceRepo.save(existing);
+        
+        AuditLog log = AuditLog.builder()
+            .userId("system")
+            .actionType(AuditAction.DEVICE_UPDATED)
+            .targetDevice(saved)
+            .oldConfig(oldConfig)
+            .newConfig(mapper.convertValue(saved, String.class))
+            .statusValue(1)
+            .build();
+        
+        auditLogRepository.save(log);
+        
+        return saved;
     }
 
     public void delete(Long id) {
+        DeviceInfo device = deviceRepo.findById(id)
+            .orElseThrow(() -> new RuntimeException("Устройство не найдено для удаления"));
+        
+        String oldConfig = mapper.convertValue(device, String.class);
+        
         if (deviceRepo.existsById(id)) {
             deviceRepo.deleteById(id);
         } else {
             throw new RuntimeException("Устройство не найдено для удаления");
         }
+        
+        AuditLog log = AuditLog.builder()
+            .userId("system")
+            .actionType(AuditAction.DEVICE_DELETED)
+            .targetDevice(device)
+            .oldConfig(oldConfig)
+            .newConfig(null)
+            .statusValue(1)
+            .build();
+        
+        auditLogRepository.save(log);
     }
 
     private boolean isValidIp(String ip) {

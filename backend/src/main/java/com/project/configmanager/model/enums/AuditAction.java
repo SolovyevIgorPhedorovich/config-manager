@@ -2,6 +2,7 @@ package com.project.configmanager.model.enums;
 
 public enum AuditAction {
     DEVICE_ADDED,
+    DEVICE_DELETED,
     CONFIG_APPLIED,
     CONFIG_ROLLED_BACK,
     DEVICE_UPDATED;

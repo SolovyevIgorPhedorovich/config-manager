@@ -7,15 +7,19 @@ import org.snmp4j.event.ResponseEvent;
 import org.snmp4j.mp.SnmpConstants;
 import org.snmp4j.smi.*;
 import org.snmp4j.transport.DefaultUdpTransportMapping;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import com.project.configmanager.model.device.DeviceInfo;
-import com.project.configmanager.model.device.DeviceOS;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.project.configmanager.model.AuditLog;
 import com.project.configmanager.model.device.DeviceGroup;
+import com.project.configmanager.model.device.DeviceInfo;
 import com.project.configmanager.model.device.DeviceIP;
+import com.project.configmanager.model.device.DeviceOS;
+import com.project.configmanager.model.enums.AuditAction;
 import com.project.configmanager.repository.DeviceRepository;
+import com.project.configmanager.repository.AuditLogRepository;
 
 import java.net.InetAddress;
 import java.util.ArrayList;
@@ -28,12 +32,14 @@ import java.util.concurrent.Executors;
 public class NetworkScannerService {
 
     private final DeviceRepository deviceRepo;
+    private final AuditLogRepository auditLogRepository;
+    private final ObjectMapper mapper;
 
-    @Value("${scanner.max-parallel:16}")
-    private int maxParallel = 16;
-
-    public NetworkScannerService(DeviceRepository deviceRepo) {
+    @Autowired
+    public NetworkScannerService(DeviceRepository deviceRepo, AuditLogRepository auditLogRepository, ObjectMapper mapper) {
         this.deviceRepo = deviceRepo;
+        this.auditLogRepository = auditLogRepository;
+        this.mapper = mapper;
     }
 
     @Async("taskExecutor")
@@ -51,13 +57,12 @@ public class NetworkScannerService {
                 throw new IllegalArgumentException("Слишком большая сеть! Максимум: /24 (256 хостов)");
             }
 
-            ExecutorService executor = Executors.newFixedThreadPool(maxParallel);
+            ExecutorService executor = Executors.newFixedThreadPool(16);
             List<CompletableFuture<Void>> futures = new ArrayList<>();
             
             for (int i = 0; i < hostsCount; i++) {
                 byte[] currentIp = ipBytes.clone();
                 
-                // Увеличиваем IP на i
                 int carry = i;
                 for (int j = 3; j >= 0; j--) {
                     int sum = (currentIp[j] & 0xFF) + carry;
@@ -71,7 +76,6 @@ public class NetworkScannerService {
                                 (currentIp[2] & 0xFF) + "." +
                                 (currentIp[3] & 0xFF));
 
-                // Пропускаем сетевой и broadcast адреса
                 if (mask > 0 && mask < 32) {
                     try {
                         InetAddress addr = InetAddress.getByName(ipStr);
@@ -101,8 +105,21 @@ public class NetworkScannerService {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             executor.shutdown();
 
-            int savedCount = deviceRepo.saveAll(foundDevices).size();
-            System.out.printf("Найдено %d устройств, сохранено %d новых.%n", foundDevices.size(), savedCount);
+            deviceRepo.saveAll(foundDevices);
+            
+            for (DeviceInfo device : foundDevices) {
+                AuditLog log = AuditLog.builder()
+                    .userId("system")
+                    .actionType(AuditAction.DEVICE_ADDED)
+                    .targetDevice(device)
+                    .oldConfig(null)
+                    .newConfig(mapper.convertValue(device, String.class))
+                    .statusValue(1)
+                    .build();
+                auditLogRepository.save(log);
+            }
+            
+            System.out.printf("Найдено %d устройств.%n", foundDevices.size());
 
         } catch (Exception e) {
             throw new RuntimeException("Ошибка сканирования: " + e.getMessage(), e);
@@ -110,8 +127,6 @@ public class NetworkScannerService {
 
         return CompletableFuture.completedFuture(foundDevices);
     }
-
-    // --- Методы для SNMP-запросов ---
 
     private DeviceInfo probeDevice(String ip, int port, String community, String version) throws Exception {
         TransportMapping<UdpAddress> transport = new DefaultUdpTransportMapping();
@@ -180,11 +195,11 @@ public class NetworkScannerService {
         if (pdu == null || pdu.size() == 0) return null;
 
         for (VariableBinding vb : pdu.getVariableBindings()) {
-        if (vb != null && oid.equals(vb.getOid())) {
-            Variable var = vb.getVariable();
-            return var == null ? null : var.toString();
+            if (vb != null && oid.equals(vb.getOid())) {
+                Variable var = vb.getVariable();
+                return var == null ? null : var.toString();
+            }
         }
-    }
         return null;
     }
 
@@ -200,10 +215,8 @@ public class NetworkScannerService {
         if (lower.contains("cisco") && lower.contains("switch")) return 4;
         if (lower.contains("cisco") && lower.contains("router")) return 5;
 
-        return 6; // Proxmox/VM по умолчанию
+        return 6;
     }
-
-    // --- Вспомогательные методы IP ---
 
     private byte[] getNetworkAddressBytes(InetAddress addr, int mask) {
         try {

@@ -167,6 +167,7 @@ public class DeviceController {
             info.getHostname(),
             ips,
             // typeCodeName — если у вас есть enum DeviceType:
+            info.getTypeCode(),
             java.util.Optional.ofNullable(info.getTypeCode())
                 .map(com.project.configmanager.model.enums.DeviceType::fromCode)
                 .map(com.project.configmanager.model.enums.DeviceType::getString)
