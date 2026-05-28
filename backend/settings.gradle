@@ -15,7 +15,10 @@ dependencyResolutionManagement {
 
 rootProject.name = 'configmanager'
 
-include 'domain'
-include 'repository'
-include 'service'
-include 'web'
+include 'AuthModule'
+include 'ConfigManager'
+include 'AuditLogger'
+include 'ProtocolAdapters'
+include 'DataStore'
+include 'Inventory'
+include 'Scheduler'

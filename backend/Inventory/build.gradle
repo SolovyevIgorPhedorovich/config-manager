@@ -1,0 +1,8 @@
+dependencies {
+    implementation project(':DataStore')
+    implementation project(':ProtocolAdapters')
+
+    implementation 'org.springframework.boot:spring-boot-starter-json'
+    implementation 'org.springframework:spring-context'
+    implementation 'org.snmp4j:snmp4j:3.10.0'
+}
