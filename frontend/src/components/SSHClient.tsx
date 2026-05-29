@@ -5,7 +5,7 @@ import { Modal, Button, Form, InputNumber, Input, message, Typography, Space } f
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 interface SSHClientProps {
   open: boolean;
@@ -16,7 +16,9 @@ interface SSHClientProps {
 export default function SSHClient({ open, onClose, device }: SSHClientProps) {
   const termRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
   const [loading, setLoading] = useState(false);
+  const [connected, setConnected] = useState(false);
   const [form] = Form.useForm();
 
   // Настройки по умолчанию
@@ -41,14 +43,19 @@ export default function SSHClient({ open, onClose, device }: SSHClientProps) {
       term.open(termRef.current);
       fitAddon.fit();
 
-      // Обработка resize
-      window.addEventListener('resize', () => fitAddon.fit());
+      const handleResize = () => fitAddon.fit();
+      window.addEventListener('resize', handleResize);
 
       terminalRef.current = term;
 
       // Очистка при закрытии
       return () => {
-        window.removeEventListener('resize', () => {});
+        window.removeEventListener('resize', handleResize);
+        socketRef.current?.close();
+        socketRef.current = null;
+        terminalRef.current?.dispose();
+        terminalRef.current = null;
+        setConnected(false);
       };
     }
   }, [open]);
@@ -60,9 +67,11 @@ export default function SSHClient({ open, onClose, device }: SSHClientProps) {
       const wsUrl = `ws://localhost:8080/api/ssh/connect?host=${values.host}&port=${values.port || 22}&user=${values.user}`;
       
       const socket = new WebSocket(wsUrl);
+      socketRef.current = socket;
 
       socket.onopen = () => {
         message.success(`Подключено к ${values.host}`);
+        setConnected(true);
         if (terminalRef.current) {
           terminalRef.current.focus();
           socket.send('echo "SSH-подключение установлено"\n');
@@ -79,12 +88,19 @@ export default function SSHClient({ open, onClose, device }: SSHClientProps) {
       socket.onerror = () => {
         message.error('Ошибка подключения. Проверьте настройки backend.');
         setLoading(false);
+        setConnected(false);
+      };
+
+      socket.onclose = () => {
+        setConnected(false);
       };
 
       // Отправка ввода пользователя
       if (terminalRef.current) {
         terminalRef.current.onData((data) => {
-          socket.send(JSON.stringify({ input: data }));
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ input: data }));
+          }
         });
       }
 
@@ -94,6 +110,14 @@ export default function SSHClient({ open, onClose, device }: SSHClientProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDisconnect = () => {
+    socketRef.current?.close();
+    socketRef.current = null;
+    setConnected(false);
+    terminalRef.current?.write('\r\nSSH-сессия отключена\r\n');
+    message.success('SSH-сессия отключена');
   };
 
   return (
@@ -123,9 +147,14 @@ export default function SSHClient({ open, onClose, device }: SSHClientProps) {
         <Form.Item name="port" label="Порт">
           <InputNumber min={1} max={65535} defaultValue={22} />
         </Form.Item>
-        <Button type="primary" htmlType="submit" loading={loading}>
-          Подключиться
-        </Button>
+        <Space>
+          <Button type="primary" htmlType="submit" loading={loading}>
+            Подключиться
+          </Button>
+          <Button danger disabled={!connected} onClick={handleDisconnect}>
+            Отключиться
+          </Button>
+        </Space>
       </Form>
 
       {/* Терминал */}
