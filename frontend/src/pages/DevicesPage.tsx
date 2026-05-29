@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Table, Space, Button, Tag, Empty, message, Tabs, AutoComplete, DatePicker, Select, Typography, Input, Switch, Row, Col, Progress, Tooltip } from 'antd';
+import { Card, Table, Space, Button, Tag, Empty, message, Tabs, AutoComplete, DatePicker, Select, Typography, Input, Row, Col, Progress, Tooltip } from 'antd';
 import dayjs from 'dayjs';
 import { devicesApi } from '../api/devicesApi';
 import type { ConfigVersion, Device } from '../types';
@@ -111,7 +111,26 @@ const demoConfigVersions: ConfigVersion[] = [
 ];
 
 
-type DiffLine = { value: string; status: 'added' | 'removed' | 'unchanged' };
+type DiffLine = { option: string; value: string; raw: string; status: 'added' | 'removed' | 'unchanged' };
+
+const parseConfigLine = (line: string): Omit<DiffLine, 'status'> => {
+  const trimmed = line.trim();
+  const [first = '', second = '', ...rest] = trimmed.split(/\s+/);
+
+  if (!trimmed) return { option: 'пустая строка', value: '—', raw: line };
+  if (first === 'hostname') return { option: 'hostname', value: [second, ...rest].join(' '), raw: line };
+  if (first === 'interface') return { option: 'interface', value: [second, ...rest].join(' '), raw: line };
+  if (first === 'description') return { option: 'description', value: [second, ...rest].join(' '), raw: line };
+  if (first === 'ip' && second === 'address') return { option: 'ip address', value: rest.join(' '), raw: line };
+  if (first === 'no' && second === 'shutdown') return { option: 'shutdown', value: 'disabled', raw: line };
+  if (first === 'shutdown') return { option: 'shutdown', value: 'enabled', raw: line };
+  if (first === 'router') return { option: `router ${second}`, value: rest.join(' '), raw: line };
+  if (first === 'network') return { option: 'network', value: [second, ...rest].join(' '), raw: line };
+  if (first === 'service') return { option: `service ${second}`, value: rest.join(' '), raw: line };
+  if (first === 'logging') return { option: `logging ${second}`, value: rest.join(' '), raw: line };
+
+  return { option: first, value: [second, ...rest].join(' ') || 'enabled', raw: line };
+};
 
 const buildPanelDiff = (previous: string, current: string) => {
   const previousLines = previous.split('\n');
@@ -119,11 +138,11 @@ const buildPanelDiff = (previous: string, current: string) => {
 
   return {
     previous: previousLines.map<DiffLine>((line) => ({
-      value: line,
+      ...parseConfigLine(line),
       status: currentLines.includes(line) ? 'unchanged' : 'removed',
     })),
     current: currentLines.map<DiffLine>((line) => ({
-      value: line,
+      ...parseConfigLine(line),
       status: previousLines.includes(line) ? 'unchanged' : 'added',
     })),
   };
@@ -144,8 +163,10 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [auditDateRange, setAuditDateRange] = useState<[any, any] | null>(null);
   const [auditDeviceType, setAuditDeviceType] = useState<string>();
   const [auditResponsible, setAuditResponsible] = useState<string>();
-  const [dryRun, setDryRun] = useState(true);
-  const [transferredLines, setTransferredLines] = useState<string[]>([]);
+  const [auditAction, setAuditAction] = useState<string>();
+  const [auditDevice, setAuditDevice] = useState<string>();
+  const [auditResult, setAuditResult] = useState<string>();
+  const [transferredLines, setTransferredLines] = useState<Record<number, DiffLine>>({});
   const [configVersions, setConfigVersions] = useState<ConfigVersion[]>(demoConfigVersions);
   const [selectedConfigVersionId, setSelectedConfigVersionId] = useState<number>(demoConfigVersions[0].id!);
   const [linuxModalOpen, setLinuxModalOpen] = useState(false);
@@ -291,7 +312,7 @@ export default function DevicesPage({ type }: { type?: string }) {
     if (!selectedDevice?.id) {
       setConfigVersions(demoConfigVersions);
       setSelectedConfigVersionId(demoConfigVersions[0].id!);
-      setTransferredLines([]);
+      setTransferredLines({});
       return;
     }
 
@@ -301,13 +322,13 @@ export default function DevicesPage({ type }: { type?: string }) {
       const nextVersions = versions.length > 0 ? versions : demoConfigVersions;
       setConfigVersions(nextVersions);
       setSelectedConfigVersionId(nextVersions[0].id!);
-      setTransferredLines([]);
+      setTransferredLines({});
     } catch (err) {
       const fallbackVersions = demoConfigVersions.filter((config) => config.deviceId === selectedDevice.id);
       const nextVersions = fallbackVersions.length > 0 ? fallbackVersions : demoConfigVersions;
       setConfigVersions(nextVersions);
       setSelectedConfigVersionId(nextVersions[0].id!);
-      setTransferredLines([]);
+      setTransferredLines({});
     }
   };
 
@@ -315,9 +336,9 @@ export default function DevicesPage({ type }: { type?: string }) {
     configVersions.find((config) => config.id === selectedConfigVersionId) || configVersions[0]
   ), [configVersions, selectedConfigVersionId]);
 
-  const handleTransferLine = (line: string) => {
-    setTransferredLines((prev) => prev.includes(line) ? prev : [...prev, line]);
-    message.success(`Строка перенесена в текущую конфигурацию: ${line.trim() || 'пустая строка'}`);
+  const handleTransferLine = (line: DiffLine, sourceIndex: number) => {
+    setTransferredLines((prev) => ({ ...prev, [sourceIndex]: { ...line, status: 'added' } }));
+    message.success(`Опция перенесена в текущую конфигурацию: ${line.option}: ${line.value}`);
   };
 
   const diffPanels = useMemo(() => {
@@ -326,12 +347,17 @@ export default function DevicesPage({ type }: { type?: string }) {
       selectedConfigVersion?.newConfig || currentConfig,
     );
 
+    let transferIndex = 0;
+
     return {
       previous: baseDiff.previous,
-      current: [
-        ...baseDiff.current,
-        ...transferredLines.map<DiffLine>((line) => ({ value: line, status: 'added' })),
-      ],
+      current: baseDiff.current.map((line) => {
+        if (line.status !== 'added') return line;
+
+        const transferred = Object.values(transferredLines)[transferIndex];
+        transferIndex += 1;
+        return transferred || line;
+      }),
     };
   }, [selectedConfigVersion, transferredLines]);
 
@@ -371,9 +397,12 @@ export default function DevicesPage({ type }: { type?: string }) {
     );
     const matchesType = !auditDeviceType || row.deviceType === auditDeviceType;
     const matchesResponsible = !auditResponsible || row.user === auditResponsible;
+    const matchesAction = !auditAction || row.action === auditAction;
+    const matchesDevice = !auditDevice || row.device === auditDevice;
+    const matchesResult = !auditResult || row.result === auditResult;
 
-    return matchesDate && matchesType && matchesResponsible;
-  }), [auditRows, auditDateRange, auditDeviceType, auditResponsible]);
+    return matchesDate && matchesType && matchesResponsible && matchesAction && matchesDevice && matchesResult;
+  }), [auditRows, auditDateRange, auditDeviceType, auditResponsible, auditAction, auditDevice, auditResult]);
 
   const auditColumnFilters = (field: 'datetime' | 'user' | 'action' | 'device' | 'deviceType' | 'result') => (
     Array.from(new Set(auditRows.map((row) => row[field]))).map((value) => ({ text: value, value }))
@@ -438,14 +467,14 @@ export default function DevicesPage({ type }: { type?: string }) {
         }}
       >
         <span style={{ flex: 1, fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
-          {line.value || ' '}
+          <Text strong>{line.option}</Text>: {line.value || ' '}
         </span>
         {canTransfer && (
           <Tooltip title="Перенести строку в текущую конфигурацию">
             <Button
               aria-label="Перенести строку вправо"
               icon={<ArrowRightOutlined />}
-              onClick={() => handleTransferLine(line.value)}
+              onClick={() => handleTransferLine(line, index)}
               size="small"
               type="text"
             />
@@ -659,7 +688,7 @@ interface Gi0/1
                                     type={record.id === selectedConfigVersionId ? 'primary' : 'default'}
                                     onClick={() => {
                                       setSelectedConfigVersionId(record.id!);
-                                      setTransferredLines([]);
+                                      setTransferredLines({});
                                     }}
                                   >
                                     Открыть в сравнении
@@ -685,7 +714,7 @@ interface Gi0/1
                               style={{ minWidth: 360 }}
                               onChange={(value) => {
                                 setSelectedConfigVersionId(value);
-                                setTransferredLines([]);
+                                setTransferredLines({});
                               }}
                               options={configVersions.map((config) => ({
                                 value: config.id!,
@@ -714,10 +743,6 @@ interface Gi0/1
                           <Space wrap>
                             <Button type="primary" icon={<FileDoneOutlined />}>Применить</Button>
                             <Button icon={<ReloadOutlined />}>Откатить</Button>
-                            <Space>
-                              <Text>Dry Run</Text>
-                              <Switch checked={dryRun} onChange={setDryRun} />
-                            </Space>
                             <Button icon={<DownloadOutlined />}>Выгрузить</Button>
                           </Space>
                         </Space>
@@ -761,6 +786,9 @@ interface Gi0/1
                   <DatePicker.RangePicker onChange={(value) => setAuditDateRange(value as [any, any] | null)} />
                   <Select allowClear placeholder="Ответственный" style={{ width: 180 }} onChange={setAuditResponsible} options={[{ value: 'admin', label: 'admin' }, { value: 'operator', label: 'operator' }, { value: 'network-engineer', label: 'network-engineer' }]} />
                   <Select allowClear placeholder="Тип устройства" style={{ width: 180 }} onChange={setAuditDeviceType} options={Object.entries(deviceTypeInfo).map(([k, v]) => ({ value: k, label: v.name }))} />
+                  <Select allowClear placeholder="Действие" style={{ width: 180 }} onChange={setAuditAction} options={auditColumnFilters('action').map(({ value }) => ({ value, label: value }))} />
+                  <Select allowClear placeholder="Устройство" style={{ width: 180 }} onChange={setAuditDevice} options={auditColumnFilters('device').map(({ value }) => ({ value, label: value }))} />
+                  <Select allowClear placeholder="Результат" style={{ width: 180 }} onChange={setAuditResult} options={auditColumnFilters('result').map(({ value }) => ({ value, label: value }))} />
                 </Space>
                 <Table columns={auditColumns} dataSource={filteredAuditRows} />
               </Card>

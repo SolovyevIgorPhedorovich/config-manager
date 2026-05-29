@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Avatar, Breadcrumb, Dropdown, Layout, Menu, Space, Tag, Typography } from 'antd';
+import { Avatar, Breadcrumb, Dropdown, Layout, Menu, Space, Typography } from 'antd';
 import {
   HomeOutlined,
   ToolOutlined,
@@ -75,27 +75,24 @@ function AppWithNavigation() {
         <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#fff' }}>
           🖥️ IT Configuration Manager
         </div>
-        <Space size="large">
-          <Tag color="processing">Версия 1.0</Tag>
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'status', label: `Статус: подключен`, disabled: true },
-                { key: 'role', label: `Роль: ${currentRole}`, disabled: true },
-                { type: 'divider' },
-                { key: 'logout', icon: <LogoutOutlined />, label: 'Выйти из системы', onClick: handleLogout },
-              ],
-            }}
-            trigger={['click']}
-          >
-            <Space style={{ cursor: 'pointer', color: '#fff' }}>
-              <Avatar size="small" icon={<UserOutlined />} />
+        <Dropdown
+          menu={{
+            items: [
+              { key: 'role', label: `Роль: ${currentRole}`, disabled: true },
+              { type: 'divider' },
+              { key: 'logout', icon: <LogoutOutlined />, label: 'Выйти из системы', onClick: handleLogout },
+            ],
+          }}
+          trigger={['click']}
+        >
+          <Space style={{ cursor: 'pointer', color: '#fff' }}>
+            <Avatar size="small" icon={<UserOutlined />} />
+            <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
               <span>{currentUser}</span>
-              <Tag color="success">Подключен</Tag>
-              <Text style={{ color: '#bfdbfe' }}>{currentRole}</Text>
-            </Space>
-          </Dropdown>
-        </Space>
+              <Text style={{ color: '#bfdbfe', fontSize: 12 }}>{currentRole}</Text>
+            </span>
+          </Space>
+        </Dropdown>
       </Header>
 
       <Layout>
