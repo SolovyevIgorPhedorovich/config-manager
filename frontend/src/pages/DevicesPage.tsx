@@ -4,7 +4,7 @@ import dayjs from 'dayjs';
 import { devicesApi } from '../api/devicesApi';
 import type { ConfigVersion, Device } from '../types';
 import SSHClient from '../components/SSHClient';
-import { CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined } from "@ant-design/icons"
+import { ArrowRightOutlined, CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined } from "@ant-design/icons"
 import { ScanDeviceModal } from '../components/ScanDeviceModal';
 import { AddDeviceModal } from '../components/AddDeviceModal';
 import { ScanProgress } from '../components/ScanProgress';
@@ -15,7 +15,7 @@ import ConfigMFUModal from '../components/ConfigMFUModal';
 import ConfigCiscoModal from '../components/ConfigCiscoModal';
 
 
-const { Text } = Typography;
+const { Text, Paragraph } = Typography;
 const { Search } = Input;
 
 
@@ -144,8 +144,8 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [auditDateRange, setAuditDateRange] = useState<[any, any] | null>(null);
   const [auditDeviceType, setAuditDeviceType] = useState<string>();
   const [auditResponsible, setAuditResponsible] = useState<string>();
-  const [configDate, setConfigDate] = useState<any>(dayjs());
   const [dryRun, setDryRun] = useState(true);
+  const [transferredLines, setTransferredLines] = useState<string[]>([]);
   const [configVersions, setConfigVersions] = useState<ConfigVersion[]>(demoConfigVersions);
   const [selectedConfigVersionId, setSelectedConfigVersionId] = useState<number>(demoConfigVersions[0].id!);
   const [linuxModalOpen, setLinuxModalOpen] = useState(false);
@@ -202,6 +202,8 @@ export default function DevicesPage({ type }: { type?: string }) {
   }
 
   const getActionProgress = (device: Device) => {
+    if (runtimeStatus(device) !== 'online') return 0;
+
     const id = device.id || 0;
     if (id % 9 === 0) return 100;
     if (id % 5 === 0) return 72;
@@ -289,6 +291,7 @@ export default function DevicesPage({ type }: { type?: string }) {
     if (!selectedDevice?.id) {
       setConfigVersions(demoConfigVersions);
       setSelectedConfigVersionId(demoConfigVersions[0].id!);
+      setTransferredLines([]);
       return;
     }
 
@@ -298,11 +301,13 @@ export default function DevicesPage({ type }: { type?: string }) {
       const nextVersions = versions.length > 0 ? versions : demoConfigVersions;
       setConfigVersions(nextVersions);
       setSelectedConfigVersionId(nextVersions[0].id!);
+      setTransferredLines([]);
     } catch (err) {
       const fallbackVersions = demoConfigVersions.filter((config) => config.deviceId === selectedDevice.id);
       const nextVersions = fallbackVersions.length > 0 ? fallbackVersions : demoConfigVersions;
       setConfigVersions(nextVersions);
       setSelectedConfigVersionId(nextVersions[0].id!);
+      setTransferredLines([]);
     }
   };
 
@@ -310,10 +315,25 @@ export default function DevicesPage({ type }: { type?: string }) {
     configVersions.find((config) => config.id === selectedConfigVersionId) || configVersions[0]
   ), [configVersions, selectedConfigVersionId]);
 
-  const diffPanels = useMemo(() => buildPanelDiff(
-    selectedConfigVersion?.oldConfigJson || previousConfig,
-    selectedConfigVersion?.newConfig || currentConfig,
-  ), [selectedConfigVersion]);
+  const handleTransferLine = (line: string) => {
+    setTransferredLines((prev) => prev.includes(line) ? prev : [...prev, line]);
+    message.success(`Строка перенесена в текущую конфигурацию: ${line.trim() || 'пустая строка'}`);
+  };
+
+  const diffPanels = useMemo(() => {
+    const baseDiff = buildPanelDiff(
+      selectedConfigVersion?.oldConfigJson || previousConfig,
+      selectedConfigVersion?.newConfig || currentConfig,
+    );
+
+    return {
+      previous: baseDiff.previous,
+      current: [
+        ...baseDiff.current,
+        ...transferredLines.map<DiffLine>((line) => ({ value: line, status: 'added' })),
+      ],
+    };
+  }, [selectedConfigVersion, transferredLines]);
 
   const filteredDevices = useMemo(() => {
     const normalizedSearch = deviceSearch.trim().toLowerCase();
@@ -399,23 +419,38 @@ export default function DevicesPage({ type }: { type?: string }) {
     },
   ];
 
-  const renderDiffLine = (line: DiffLine, index: number) => {
+  const renderDiffLine = (line: DiffLine, index: number, panel: 'previous' | 'current') => {
     const background = line.status === 'added' ? '#d9f7be' : line.status === 'removed' ? '#ffd6d6' : 'transparent';
     const color = line.status === 'added' ? '#135200' : line.status === 'removed' ? '#820014' : '#262626';
+    const canTransfer = panel === 'previous' && line.status === 'removed';
 
     return (
       <div
-        key={`${line.status}-${index}-${line.value}`}
+        key={`${panel}-${line.status}-${index}-${line.value}`}
         style={{
+          alignItems: 'center',
           background,
           color,
+          display: 'flex',
+          gap: 8,
+          minHeight: 28,
           padding: '2px 8px',
-          whiteSpace: 'pre-wrap',
-          fontFamily: 'monospace',
-          minHeight: 22,
         }}
       >
-        {line.value || ' '}
+        <span style={{ flex: 1, fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+          {line.value || ' '}
+        </span>
+        {canTransfer && (
+          <Tooltip title="Перенести строку в текущую конфигурацию">
+            <Button
+              aria-label="Перенести строку вправо"
+              icon={<ArrowRightOutlined />}
+              onClick={() => handleTransferLine(line.value)}
+              size="small"
+              type="text"
+            />
+          </Tooltip>
+        )}
       </div>
     );
   };
@@ -572,54 +607,83 @@ export default function DevicesPage({ type }: { type?: string }) {
             key: 'config',
             label: 'Просмотр и сравнение конфигурации',
             children: (
-              <Card title="Сравнение версий конфигурации">
-                <Space direction="vertical" style={{ width: '100%' }} size="large">
-                  <Space wrap>
-                    <Text strong>Конфигурация на дату:</Text>
-                    <DatePicker value={configDate} onChange={setConfigDate} format="DD.MM.YYYY" allowClear={false} />
-                    <Text type="secondary">По умолчанию выбрана текущая дата.</Text>
-                  </Space>
+              <Card title="Работа с конфигурациями устройства">
+                <Tabs
+                  items={[
+                    {
+                      key: 'current',
+                      label: 'Текущая',
+                      children: (
+                        <pre style={{ background: '#111', color: '#7CFC00', padding: 12 }}>
+                          {`hostname ${selectedDevice?.hostname || 'Device01'}
+interface Gi0/1
+ ip address 10.0.0.1 255.255.255.0
+ no shutdown`}
+                        </pre>
+                      ),
+                    },
+                    {
+                      key: 'history',
+                      label: 'История',
+                      children: <Paragraph>Версии конфигурации за последние 30 дней.</Paragraph>,
+                    },
+                    {
+                      key: 'compare',
+                      label: 'Сравнение',
+                      children: (
+                        <Space direction="vertical" style={{ width: '100%' }} size="large">
+                          <Space wrap>
+                            <Text strong>Конфигурация из БД:</Text>
+                            <Select
+                              value={selectedConfigVersionId}
+                              style={{ minWidth: 360 }}
+                              onChange={(value) => {
+                                setSelectedConfigVersionId(value);
+                                setTransferredLines([]);
+                              }}
+                              options={configVersions.map((config) => ({
+                                value: config.id!,
+                                label: `№ ${config.id} · версия ${config.versionNumber} · ${config.appliedAt ? new Date(config.appliedAt).toLocaleString('ru-RU') : 'без даты'}`,
+                              }))}
+                            />
+                          </Space>
 
-                  <Space wrap>
-                    <Text strong>Конфигурация из БД:</Text>
-                    <Select
-                      value={selectedConfigVersionId}
-                      style={{ minWidth: 360 }}
-                      onChange={setSelectedConfigVersionId}
-                      options={configVersions.map((config) => ({
-                        value: config.id!,
-                        label: `№ ${config.id} · версия ${config.versionNumber} · ${config.appliedAt ? new Date(config.appliedAt).toLocaleString('ru-RU') : 'без даты'}`,
-                      }))}
-                    />
-                  </Space>
+                          <Row gutter={[16, 16]}>
+                            <Col xs={24} lg={12}>
+                              <Card size="small" title="Предыдущая конфигурация" styles={{ body: { padding: 0 } }}>
+                                <div style={{ background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
+                                  {diffPanels.previous.map((line, index) => renderDiffLine(line, index, 'previous'))}
+                                </div>
+                              </Card>
+                            </Col>
+                            <Col xs={24} lg={12}>
+                              <Card size="small" title="Текущая конфигурация" styles={{ body: { padding: 0 } }}>
+                                <div style={{ background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
+                                  {diffPanels.current.map((line, index) => renderDiffLine(line, index, 'current'))}
+                                </div>
+                              </Card>
+                            </Col>
+                          </Row>
 
-                  <Row gutter={[16, 16]}>
-                    <Col xs={24} lg={12}>
-                      <Card size="small" title="Предыдущая конфигурация" styles={{ body: { padding: 0 } }}>
-                        <div style={{ background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
-                          {diffPanels.previous.map(renderDiffLine)}
-                        </div>
-                      </Card>
-                    </Col>
-                    <Col xs={24} lg={12}>
-                      <Card size="small" title="Текущая конфигурация" styles={{ body: { padding: 0 } }}>
-                        <div style={{ background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
-                          {diffPanels.current.map(renderDiffLine)}
-                        </div>
-                      </Card>
-                    </Col>
-                  </Row>
-
-                  <Space wrap>
-                    <Button type="primary" icon={<FileDoneOutlined />}>Применить</Button>
-                    <Button icon={<ReloadOutlined />}>Откатить</Button>
-                    <Space>
-                      <Text>Dry Run</Text>
-                      <Switch checked={dryRun} onChange={setDryRun} />
-                    </Space>
-                    <Button icon={<DownloadOutlined />}>Выгрузить</Button>
-                  </Space>
-                </Space>
+                          <Space wrap>
+                            <Button type="primary" icon={<FileDoneOutlined />}>Применить</Button>
+                            <Button icon={<ReloadOutlined />}>Откатить</Button>
+                            <Space>
+                              <Text>Dry Run</Text>
+                              <Switch checked={dryRun} onChange={setDryRun} />
+                            </Space>
+                            <Button icon={<DownloadOutlined />}>Выгрузить</Button>
+                          </Space>
+                        </Space>
+                      ),
+                    },
+                    {
+                      key: 'templates',
+                      label: 'Шаблоны',
+                      children: <Paragraph>Шаблоны baseline для типов устройств.</Paragraph>,
+                    },
+                  ]}
+                />
               </Card>
             ),
           },
