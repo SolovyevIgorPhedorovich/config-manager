@@ -1,51 +1,44 @@
+import org.springframework.boot.gradle.plugin.SpringBootPlugin
+
 plugins {
-	id 'java'
-	id 'org.springframework.boot' version '4.1.0-SNAPSHOT'
-	id 'io.spring.dependency-management' version '1.1.7'
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0-SNAPSHOT' apply false
+    id 'io.spring.dependency-management' version '1.1.7' apply false
 }
 
-group = 'com.project'
-version = '0.0.1-SNAPSHOT'
-
-java {
-	toolchain {
-		languageVersion = JavaLanguageVersion.of(21)
-	}
+allprojects {
+    group = 'com.project'
+    version = '0.0.1-SNAPSHOT'
 }
 
-repositories {
-	mavenCentral()
-	maven { url = 'https://repo.spring.io/snapshot' }
-}
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'io.spring.dependency-management'
 
-dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter-web'
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    implementation 'org.springframework.boot:spring-boot-starter-json'
-    implementation 'org.snmp4j:snmp4j:3.10.0'
-    implementation 'org.springframework.boot:spring-boot-starter-security'
-    implementation 'org.springframework.boot:spring-boot-starter-data-ldap'
-    implementation 'org.springframework.ldap:spring-ldap-core'
-    runtimeOnly 'org.postgresql:postgresql:42.7.3'
-    compileOnly 'org.projectlombok:lombok:1.18.34'
-    annotationProcessor 'org.projectlombok:lombok:1.18.34'
-    implementation 'com.fasterxml.jackson.core:jackson-databind'
-    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
-	implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
-    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.13.0'
-    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.13.0' 
+    java {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
 
+    dependencyManagement {
+        imports {
+            mavenBom SpringBootPlugin.BOM_COORDINATES
+        }
+    }
 
-    // Тесты
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    dependencies {
+        compileOnly 'org.projectlombok:lombok:1.18.34'
+        annotationProcessor 'org.projectlombok:lombok:1.18.34'
 
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-}
+        testImplementation 'org.springframework.boot:spring-boot-starter-test'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
 
-tasks.named('test') {
-	useJUnitPlatform()
-}
+    tasks.named('test') {
+        useJUnitPlatform()
+    }
 
-tasks.withType(JavaCompile) {
-    options.compilerArgs << "-parameters"
+    tasks.withType(JavaCompile).configureEach {
+        options.compilerArgs << '-parameters'
+    }
 }

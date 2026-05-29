@@ -1,0 +1,19 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+dependencies {
+    implementation project(':AuthModule')
+    implementation project(':AuditLogger')
+    implementation project(':ProtocolAdapters')
+    implementation project(':DataStore')
+    implementation project(':Inventory')
+    implementation project(':Scheduler')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
+    runtimeOnly 'org.postgresql:postgresql:42.7.3'
+}

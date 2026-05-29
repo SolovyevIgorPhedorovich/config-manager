@@ -1,7 +1,24 @@
 pluginManagement {
-	repositories {
-		maven { url = 'https://repo.spring.io/snapshot' }
-		gradlePluginPortal()
-	}
+    repositories {
+        maven { url = 'https://repo.spring.io/snapshot' }
+        gradlePluginPortal()
+    }
 }
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+        maven { url = 'https://repo.spring.io/snapshot' }
+    }
+}
+
 rootProject.name = 'configmanager'
+
+include 'AuthModule'
+include 'ConfigManager'
+include 'AuditLogger'
+include 'ProtocolAdapters'
+include 'DataStore'
+include 'Inventory'
+include 'Scheduler'

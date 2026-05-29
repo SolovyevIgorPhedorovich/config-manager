@@ -1,0 +1,5 @@
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework:spring-context'
+    implementation 'org.snmp4j:snmp4j:3.10.0'
+}
