@@ -42,12 +42,31 @@ function AppWithNavigation() {
     navigate('/login', { replace: true });
   };
 
+  const renderDeviceMenuLabel = (label: string, color: string) => (
+    <span style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      color: '#e5e7eb',
+      fontWeight: 500,
+    }}>
+      <span style={{
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        background: color,
+        boxShadow: `0 0 10px ${color}`,
+      }} />
+      <span>{label}</span>
+    </span>
+  );
+
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Header style={{
         background: 'linear-gradient(90deg, #0f172a 0%, #1d4ed8 100%)',
-        padding: '0 24px',
+        padding: '0 24px 0 0',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -119,24 +138,24 @@ function AppWithNavigation() {
               title="Устройства"
               
             >
-              <Menu.Item key="/devices/windows" style={{ paddingLeft: 36 }}>
+              <Menu.Item key="/devices/windows" style={{ margin: '4px 8px', borderRadius: 10, paddingLeft: 32 }}>
                 <Link to="/devices/windows">
-                  <Tag color={deviceColors.windows}>ПК</Tag>
+                  {renderDeviceMenuLabel('ПК', deviceColors.windows)}
                 </Link>
               </Menu.Item>
-              <Menu.Item key="/devices/mfu" style={{ paddingLeft: 36 }}>
+              <Menu.Item key="/devices/mfu" style={{ margin: '4px 8px', borderRadius: 10, paddingLeft: 32 }}>
                 <Link to="/devices/mfu">
-                  <Tag color={deviceColors.mfu}>МФУ</Tag>
+                  {renderDeviceMenuLabel('МФУ', deviceColors.mfu)}
                 </Link>
               </Menu.Item>
-              <Menu.Item key="/devices/cisco" style={{ paddingLeft: 36 }}>
+              <Menu.Item key="/devices/cisco" style={{ margin: '4px 8px', borderRadius: 10, paddingLeft: 32 }}>
                 <Link to="/devices/cisco">
-                  <Tag color={deviceColors.cisco}>Cisco</Tag>
+                  {renderDeviceMenuLabel('Cisco', deviceColors.cisco)}
                 </Link>
               </Menu.Item>
-              <Menu.Item key="/devices/vm" style={{ paddingLeft: 36 }}>
+              <Menu.Item key="/devices/vm" style={{ margin: '4px 8px', borderRadius: 10, paddingLeft: 32 }}>
                 <Link to="/devices/vm">
-                  <Tag color={deviceColors.vm}>VM</Tag>
+                  {renderDeviceMenuLabel('VM / Proxmox', deviceColors.vm)}
                 </Link>
               </Menu.Item>
             </SubMenu>

@@ -39,29 +39,71 @@ ChartJS.register(
     LineElement
 );
 
-const deviceTypeInfo: Record<string, { name: string; color: string }> = {
-  windows: { name: 'ПК', color: '#1890ff' },
-  linux: { name: 'МФУ', color: '#52c41a' },
-  cisco_switch: { name: 'Cisco', color: '#fa8b0f' },
-  proxmox: { name: 'VM', color: '#f53f3f' },
-};
+const dashboardCategories = [
+  { key: 'windows', name: 'Windows', color: '#1890ff' },
+  { key: 'linux', name: 'Linux', color: '#722ed1' },
+  { key: 'mfu', name: 'МФУ', color: '#52c41a' },
+  { key: 'cisco', name: 'Cisco', color: '#fa8b0f' },
+  { key: 'proxmox', name: 'Proxmox', color: '#f53f3f' },
+] as const;
 
-const dashboardDemoDevices: Device[] = Array.from({ length: 28 }, (_, index) => {
-  const typeCode = (index % 4) as Device['typeCode'];
-  const typeNames = ['ПК', 'МФУ', 'CISCO', 'VM'];
-
-  return {
+const dashboardDemoDevices: Device[] = [
+  ...Array.from({ length: 11 }, (_, index) => ({
     id: 20_000 + index,
-    hostname: `${typeNames[typeCode].toLowerCase()}-${String(index + 1).padStart(2, '0')}`,
-    ips: [`172.16.${Math.floor(index / 128)}.${index + 10}`],
-    typeCode,
-    type: typeNames[typeCode],
+    hostname: `пк-${String(index + 1).padStart(2, '0')}`,
+    ips: [`172.16.0.${index + 10}`],
+    typeCode: 0 as const,
+    type: 'ПК',
     groupName: index % 2 === 0 ? 'ЦОД' : 'Офис',
-    osVersion: typeCode === 2 ? 'IOS XE 17.9' : typeCode === 3 ? 'Ubuntu 22.04' : 'Windows 11',
-    isActive: index % 6 !== 0,
+    osVersion: 'Windows 11',
+    isActive: index % 5 !== 0,
     createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
-  };
-});
+  })),
+  ...Array.from({ length: 6 }, (_, index) => ({
+    id: 20_100 + index,
+    hostname: `linux-${String(index + 1).padStart(2, '0')}`,
+    ips: [`172.16.1.${index + 10}`],
+    typeCode: 0 as const,
+    type: 'ПК',
+    groupName: 'Linux-серверы',
+    osVersion: index % 2 === 0 ? 'Ubuntu 22.04' : 'Debian 12',
+    isActive: index % 4 !== 0,
+    createdAt: new Date(Date.now() - (index + 11) * 3_600_000).toISOString(),
+  })),
+  ...Array.from({ length: 4 }, (_, index) => ({
+    id: 20_200 + index,
+    hostname: `мфу-${String(index + 1).padStart(2, '0')}`,
+    ips: [`172.16.2.${index + 10}`],
+    typeCode: 1 as const,
+    type: 'МФУ',
+    groupName: 'Офис',
+    osVersion: 'Firmware 4.2',
+    isActive: true,
+    createdAt: new Date(Date.now() - (index + 17) * 3_600_000).toISOString(),
+  })),
+  ...Array.from({ length: 5 }, (_, index) => ({
+    id: 20_300 + index,
+    hostname: `cisco-${String(index + 1).padStart(2, '0')}`,
+    ips: [`172.16.3.${index + 10}`],
+    typeCode: 2 as const,
+    type: 'CISCO',
+    groupName: 'Сеть',
+    osVersion: 'IOS XE 17.9',
+    isActive: index !== 3,
+    createdAt: new Date(Date.now() - (index + 21) * 3_600_000).toISOString(),
+  })),
+  ...Array.from({ length: 3 }, (_, index) => ({
+    id: 20_400 + index,
+    hostname: `proxmox-${String(index + 1).padStart(2, '0')}`,
+    ips: [`172.16.4.${index + 10}`],
+    typeCode: 3 as const,
+    type: 'VM',
+    groupName: 'Proxmox',
+    osVersion: 'Proxmox VE 8',
+    isActive: true,
+    createdAt: new Date(Date.now() - (index + 26) * 3_600_000).toISOString(),
+  })),
+];
 
 const dashboardDemoAuditLogs: AuditLog[] = Array.from({ length: 14 }, (_, index) => ({
   id: 30_000 + index,
@@ -71,6 +113,17 @@ const dashboardDemoAuditLogs: AuditLog[] = Array.from({ length: 14 }, (_, index)
   status: index % 5 === 0 ? 'FAILED' : index % 3 === 0 ? 'RUNNING' : 'SUCCESS',
   createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
 }));
+
+const getDeviceCategory = (device: Device) => {
+  const type = (device.type || '').toLowerCase();
+  const osVersion = (device.osVersion || '').toLowerCase();
+
+  if (device.typeCode === 1 || type.includes('мфу')) return 'mfu';
+  if (device.typeCode === 2 || type.includes('cisco')) return 'cisco';
+  if (device.typeCode === 3 || type.includes('vm') || osVersion.includes('proxmox')) return 'proxmox';
+  if (osVersion.includes('linux') || osVersion.includes('ubuntu') || osVersion.includes('debian')) return 'linux';
+  return 'windows';
+};
 
 export default function DashboardPage() {
   const [devices, setDevices] = useState<Device[]>([]);
@@ -108,11 +161,11 @@ export default function DashboardPage() {
     }
   };
 
-  const chartData = useMemo(() => Object.entries(deviceTypeInfo).map(([typeKey, info]) => ({
-    typeKey,
-    name: info.name,
-    count: devices.filter((device) => Object.keys(deviceTypeInfo)[device.typeCode!] === typeKey).length,
-    color: info.color,
+  const chartData = useMemo(() => dashboardCategories.map((category) => ({
+    typeKey: category.key,
+    name: category.name,
+    count: devices.filter((device) => getDeviceCategory(device) === category.key).length,
+    color: category.color,
   })), [devices]);
 
   // Данные для круговой диаграммы
@@ -165,7 +218,11 @@ export default function DashboardPage() {
 
    // Статистика
   const totalDevices = devices.length;
+  const pcCount = devices.filter((device) => device.typeCode === 0 || device.type === 'ПК').length;
+  const linuxCount = chartData.find(d => d.typeKey === 'linux')?.count || 0;
   const windowsCount = chartData.find(d => d.typeKey === 'windows')?.count || 0;
+  const mfuCount = chartData.find(d => d.typeKey === 'mfu')?.count || 0;
+  const proxmoxCount = chartData.find(d => d.typeKey === 'proxmox')?.count || 0;
   const errorCount = auditLogs.filter(l => l.status === 'FAILED').length;
 
   return (
@@ -181,43 +238,58 @@ export default function DashboardPage() {
       ) : (
         <>
           {/* Статистические карточки */}
-          <Row gutter={16} style={{ marginBottom: 24 }}>
-            <Col xs={24} sm={12} md={6}>
+          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+            <Col xs={24} sm={12} md={8} xl={4}>
               <Card>
                 <Statistic
-                  title="Всего устройств"
+                  title="Всего"
                   value={totalDevices}
                   suffix={<Tag color="#1890ff">всё</Tag>}
                 />
               </Card>
             </Col>
-            <Col xs={24} sm={12} md={6}>
+            <Col xs={24} sm={12} md={8} xl={4}>
               <Card>
                 <Statistic
-                  title="Windows ПК"
+                  title="ПК"
+                  value={pcCount}
+                  suffix={<Tag color="#1890ff">АРМ</Tag>}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={12} md={8} xl={4}>
+              <Card>
+                <Statistic
+                  title="Linux"
+                  value={linuxCount}
+                  suffix={<Tag color="#722ed1">OS</Tag>}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={12} md={8} xl={4}>
+              <Card>
+                <Statistic
+                  title="Windows"
                   value={windowsCount}
-                  suffix={<Tag color="#1890ff">ОС</Tag>}
+                  suffix={<Tag color="#1890ff">OS</Tag>}
                 />
               </Card>
             </Col>
-            <Col xs={24} sm={12} md={6}>
+            <Col xs={24} sm={12} md={8} xl={4}>
               <Card>
                 <Statistic
-                  title="Сетевое оборудование"
-                  value={
-                    chartData.find(d => d.typeKey === 'cisco_switch')?.count || 0
-                  }
-                  suffix={<Tag color="#fa8b0f">Сеть</Tag>}
+                  title="МФУ"
+                  value={mfuCount}
+                  suffix={<Tag color="#52c41a">печать</Tag>}
                 />
               </Card>
             </Col>
-            <Col xs={24} sm={12} md={6}>
+            <Col xs={24} sm={12} md={8} xl={4}>
               <Card>
                 <Statistic
-                  title="Ошибок за сутки"
-                  value={errorCount}
-                  suffix={<Tag color="warning">⚠️</Tag>}
-                  valueStyle={{ color: errorCount > 0 ? '#ff4d4f' : '#52c41a' }}
+                  title="Proxmox"
+                  value={proxmoxCount}
+                  suffix={<Tag color="#f53f3f">серверы</Tag>}
                 />
               </Card>
             </Col>
