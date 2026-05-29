@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Table, Space, Button, Tag, Empty, message, Tabs, AutoComplete, DatePicker, Select, Typography, Input, Switch, Row, Col } from 'antd';
+import { Card, Table, Space, Button, Tag, Empty, message, Tabs, AutoComplete, DatePicker, Select, Typography, Input, Switch, Row, Col, Progress, Tooltip } from 'antd';
 import dayjs from 'dayjs';
 import { devicesApi } from '../api/devicesApi';
-import type { Device } from '../types';
+import type { ConfigVersion, Device } from '../types';
 import SSHClient from '../components/SSHClient';
 import { CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined } from "@ant-design/icons"
 import { ScanDeviceModal } from '../components/ScanDeviceModal';
@@ -44,7 +44,7 @@ const demoDevices: Device[] = Array.from({ length: 64 }, (_, index) => {
 
   return {
     id: 10_000 + index,
-    hostname: `${typeName.toLowerCase()}-demo-${String(index + 1).padStart(2, '0')}`,
+    hostname: `${typeName.toLowerCase()}-${String(index + 1).padStart(2, '0')}`,
     ips: [`10.20.${Math.floor(index / 254)}.${(index % 254) + 1}`],
     typeCode,
     type: typeName,
@@ -73,6 +73,43 @@ router ospf 10
  network 10.0.0.0 0.0.0.255 area 0
 service timestamps log datetime msec
 logging buffered 8192`;
+
+const demoConfigVersions: ConfigVersion[] = [
+  {
+    id: 501,
+    deviceId: 10_000,
+    configType: 2,
+    versionNumber: 12,
+    appliedAt: new Date().toISOString(),
+    oldConfigJson: previousConfig,
+    newConfig: currentConfig,
+    diffHash: 'cfg-501',
+    rollbackAvailable: true,
+  },
+  {
+    id: 487,
+    deviceId: 10_000,
+    configType: 2,
+    versionNumber: 11,
+    appliedAt: new Date(Date.now() - 86_400_000).toISOString(),
+    oldConfigJson: previousConfig.replace('shutdown', 'no shutdown'),
+    newConfig: previousConfig,
+    diffHash: 'cfg-487',
+    rollbackAvailable: true,
+  },
+  {
+    id: 455,
+    deviceId: 10_001,
+    configType: 0,
+    versionNumber: 7,
+    appliedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+    oldConfigJson: 'hostname pc-02\nfirewall enabled\nupdates manual',
+    newConfig: 'hostname pc-02\nfirewall enabled\nupdates auto',
+    diffHash: 'cfg-455',
+    rollbackAvailable: true,
+  },
+];
+
 
 type DiffLine = { value: string; status: 'added' | 'removed' | 'unchanged' };
 
@@ -109,6 +146,8 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [auditResponsible, setAuditResponsible] = useState<string>();
   const [configDate, setConfigDate] = useState<any>(dayjs());
   const [dryRun, setDryRun] = useState(true);
+  const [configVersions, setConfigVersions] = useState<ConfigVersion[]>(demoConfigVersions);
+  const [selectedConfigVersionId, setSelectedConfigVersionId] = useState<number>(demoConfigVersions[0].id!);
   const [linuxModalOpen, setLinuxModalOpen] = useState(false);
   const [windowsModalOpen, setWindowsModalOpen] = useState(false);
   const [mfuModalOpen, setMfuModalOpen] = useState(false);
@@ -117,6 +156,10 @@ export default function DevicesPage({ type }: { type?: string }) {
   useEffect(() => {
     loadDevices();
   }, [type]);
+
+  useEffect(() => {
+    loadConfigVersions();
+  }, [selectedDevice]);
 
   const runtimeStatus = (device: Device): DeviceRuntimeStatus => {
     if (device.isActive) return 'online';
@@ -158,6 +201,21 @@ export default function DevicesPage({ type }: { type?: string }) {
     message.success("Устройство удалено");
   }
 
+  const getActionProgress = (device: Device) => {
+    const id = device.id || 0;
+    if (id % 9 === 0) return 100;
+    if (id % 5 === 0) return 72;
+    if (id % 4 === 0) return 46;
+    if (id % 7 === 0) return 18;
+    return 0;
+  };
+
+  const getActionProgressStatus = (progress: number) => {
+    if (progress >= 100) return 'success';
+    if (progress > 0 && progress < 30) return 'exception';
+    return 'normal';
+  };
+
   const deviceColumns: ColumnsType<Device> = [
     { title: 'IP-адрес', key: 'ip', render: (_, record) => record.ips?.[0] || '—' },
     { title: 'Имя устройства', dataIndex: 'hostname', key: 'hostname' },
@@ -183,14 +241,34 @@ export default function DevicesPage({ type }: { type?: string }) {
       render: (_, record) => (record.createdAt ? new Date(record.createdAt).toLocaleString('ru-RU') : '—'),
     },
     {
+      title: 'Выполнение',
+      key: 'progress',
+      render: (_, record) => {
+        const progress = getActionProgress(record);
+        return progress > 0 ? (
+          <Progress type="circle" size={44} percent={progress} status={getActionProgressStatus(progress)} />
+        ) : (
+          <Text type="secondary">—</Text>
+        );
+      },
+    },
+    {
       title: 'Действия',
       key: 'actions',
       render: (_, record) => (
         <Space size="small" wrap>
-          <Button icon={<EditOutlined/>} onClick={() => { setSelectedDevice(record); openConfigModalByType(record)}}></Button>
-          <Button icon={<CodeOutlined />} onClick={() => { setSelectedDevice(record); setShowSSH(true); }}>Конфигурация</Button>
-          <Button icon={<ScanOutlined />} onClick={() => message.info(`Инвентаризация запущена для ${record.hostname}`)}>Инвентаризация</Button>
-          <Button danger icon={<DeleteOutlined />} onClick={() => handleDelete(record.id)}>Удалить</Button>
+          <Tooltip title="Редактировать">
+            <Button aria-label="Редактировать" icon={<EditOutlined/>} onClick={() => { setSelectedDevice(record); openConfigModalByType(record)}} />
+          </Tooltip>
+          <Tooltip title="Конфигурация">
+            <Button aria-label="Конфигурация" icon={<CodeOutlined />} onClick={() => { setSelectedDevice(record); setShowSSH(true); }} />
+          </Tooltip>
+          <Tooltip title="Инвентаризация">
+            <Button aria-label="Инвентаризация" icon={<ScanOutlined />} onClick={() => message.info(`Инвентаризация запущена для ${record.hostname}`)} />
+          </Tooltip>
+          <Tooltip title="Удалить">
+            <Button aria-label="Удалить" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record.id)} />
+          </Tooltip>
         </Space>
       ),
     },
@@ -207,7 +285,35 @@ export default function DevicesPage({ type }: { type?: string }) {
     }
   };
 
-  const diffPanels = useMemo(() => buildPanelDiff(previousConfig, currentConfig), []);
+  const loadConfigVersions = async () => {
+    if (!selectedDevice?.id) {
+      setConfigVersions(demoConfigVersions);
+      setSelectedConfigVersionId(demoConfigVersions[0].id!);
+      return;
+    }
+
+    try {
+      const res = await devicesApi.getHistory(selectedDevice.id);
+      const versions = res.data.length > 0 ? res.data : demoConfigVersions.filter((config) => config.deviceId === selectedDevice.id);
+      const nextVersions = versions.length > 0 ? versions : demoConfigVersions;
+      setConfigVersions(nextVersions);
+      setSelectedConfigVersionId(nextVersions[0].id!);
+    } catch (err) {
+      const fallbackVersions = demoConfigVersions.filter((config) => config.deviceId === selectedDevice.id);
+      const nextVersions = fallbackVersions.length > 0 ? fallbackVersions : demoConfigVersions;
+      setConfigVersions(nextVersions);
+      setSelectedConfigVersionId(nextVersions[0].id!);
+    }
+  };
+
+  const selectedConfigVersion = useMemo(() => (
+    configVersions.find((config) => config.id === selectedConfigVersionId) || configVersions[0]
+  ), [configVersions, selectedConfigVersionId]);
+
+  const diffPanels = useMemo(() => buildPanelDiff(
+    selectedConfigVersion?.oldConfigJson || previousConfig,
+    selectedConfigVersion?.newConfig || currentConfig,
+  ), [selectedConfigVersion]);
 
   const filteredDevices = useMemo(() => {
     const normalizedSearch = deviceSearch.trim().toLowerCase();
@@ -248,6 +354,50 @@ export default function DevicesPage({ type }: { type?: string }) {
 
     return matchesDate && matchesType && matchesResponsible;
   }), [auditRows, auditDateRange, auditDeviceType, auditResponsible]);
+
+  const auditColumnFilters = (field: 'datetime' | 'user' | 'action' | 'device' | 'deviceType' | 'result') => (
+    Array.from(new Set(auditRows.map((row) => row[field]))).map((value) => ({ text: value, value }))
+  );
+
+  const auditColumns = [
+    {
+      title: 'Дата/время',
+      dataIndex: 'datetime',
+      filters: auditColumnFilters('datetime'),
+      onFilter: (value: React.Key | boolean, record: any) => record.datetime === value,
+    },
+    {
+      title: 'Ответственный',
+      dataIndex: 'user',
+      filters: auditColumnFilters('user'),
+      onFilter: (value: React.Key | boolean, record: any) => record.user === value,
+    },
+    {
+      title: 'Действие',
+      dataIndex: 'action',
+      filters: auditColumnFilters('action'),
+      onFilter: (value: React.Key | boolean, record: any) => record.action === value,
+    },
+    {
+      title: 'Устройство',
+      dataIndex: 'device',
+      filters: auditColumnFilters('device'),
+      onFilter: (value: React.Key | boolean, record: any) => record.device === value,
+    },
+    {
+      title: 'Тип устройства',
+      dataIndex: 'deviceType',
+      filters: auditColumnFilters('deviceType'),
+      onFilter: (value: React.Key | boolean, record: any) => record.deviceType === value,
+    },
+    {
+      title: 'Результат',
+      dataIndex: 'result',
+      filters: auditColumnFilters('result'),
+      onFilter: (value: React.Key | boolean, record: any) => record.result === value,
+      render: (value: string) => <Tag color={value === 'Успех' ? 'success' : 'error'}>{value}</Tag>,
+    },
+  ];
 
   const renderDiffLine = (line: DiffLine, index: number) => {
     const background = line.status === 'added' ? '#d9f7be' : line.status === 'removed' ? '#ffd6d6' : 'transparent';
@@ -407,6 +557,7 @@ export default function DevicesPage({ type }: { type?: string }) {
                     pagination={{
                       defaultPageSize: 15,
                       pageSizeOptions: [15, 30, 50],
+                      locale: { items_per_page: '' },
                       position: ['bottomRight'],
                       showSizeChanger: true,
                       showTotal: (total, range) => `${range[0]}-${range[1]} из ${total} устройств`,
@@ -427,6 +578,19 @@ export default function DevicesPage({ type }: { type?: string }) {
                     <Text strong>Конфигурация на дату:</Text>
                     <DatePicker value={configDate} onChange={setConfigDate} format="DD.MM.YYYY" allowClear={false} />
                     <Text type="secondary">По умолчанию выбрана текущая дата.</Text>
+                  </Space>
+
+                  <Space wrap>
+                    <Text strong>Конфигурация из БД:</Text>
+                    <Select
+                      value={selectedConfigVersionId}
+                      style={{ minWidth: 360 }}
+                      onChange={setSelectedConfigVersionId}
+                      options={configVersions.map((config) => ({
+                        value: config.id!,
+                        label: `№ ${config.id} · версия ${config.versionNumber} · ${config.appliedAt ? new Date(config.appliedAt).toLocaleString('ru-RU') : 'без даты'}`,
+                      }))}
+                    />
                   </Space>
 
                   <Row gutter={[16, 16]}>
@@ -488,7 +652,7 @@ export default function DevicesPage({ type }: { type?: string }) {
                   <Select allowClear placeholder="Ответственный" style={{ width: 180 }} onChange={setAuditResponsible} options={[{ value: 'admin', label: 'admin' }, { value: 'operator', label: 'operator' }, { value: 'network-engineer', label: 'network-engineer' }]} />
                   <Select allowClear placeholder="Тип устройства" style={{ width: 180 }} onChange={setAuditDeviceType} options={Object.entries(deviceTypeInfo).map(([k, v]) => ({ value: k, label: v.name }))} />
                 </Space>
-                <Table columns={[{ title: 'Дата/время', dataIndex: 'datetime' }, { title: 'Ответственный', dataIndex: 'user' }, { title: 'Действие', dataIndex: 'action' }, { title: 'Устройство', dataIndex: 'device' }, { title: 'Тип устройства', dataIndex: 'deviceType' }, { title: 'Результат', dataIndex: 'result', render: (v: string) => <Tag color={v === 'Успех' ? 'success' : 'error'}>{v}</Tag> }]} dataSource={filteredAuditRows} />
+                <Table columns={auditColumns} dataSource={filteredAuditRows} />
               </Card>
             ),
           },

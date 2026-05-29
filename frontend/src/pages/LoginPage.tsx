@@ -27,6 +27,8 @@ export default function LoginPage() {
       if (res.ok) {
         const data = await res.json();
         localStorage.setItem('token', data.token);
+        localStorage.setItem('username', values.username);
+        localStorage.setItem('role', values.authType === 'AD' ? 'Доменный пользователь' : 'Администратор');
         message.success('Вход выполнен!');
         navigate(from, { replace: true });
       } else {

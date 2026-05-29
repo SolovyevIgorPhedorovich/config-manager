@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Card, Table, Tag, Space, Typography, Row, Col, Statistic,
-  Empty, Alert
+  Card, Table, Tag, Typography, Row, Col, Statistic,
+  Empty
 } from 'antd';
 import {
-  Pie, Bar, Line
+  Pie, Line
 } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -46,12 +46,30 @@ const deviceTypeInfo: Record<string, { name: string; color: string }> = {
   proxmox: { name: 'VM', color: '#f53f3f' },
 };
 
-// Преобразуем типы в массив для диаграммы
-const chartData = Object.entries(deviceTypeInfo).map(([typeKey, info]) => ({
-  typeKey,
-  name: info.name,
-  count: 0,
-  color: info.color,
+const dashboardDemoDevices: Device[] = Array.from({ length: 28 }, (_, index) => {
+  const typeCode = (index % 4) as Device['typeCode'];
+  const typeNames = ['ПК', 'МФУ', 'CISCO', 'VM'];
+
+  return {
+    id: 20_000 + index,
+    hostname: `${typeNames[typeCode].toLowerCase()}-${String(index + 1).padStart(2, '0')}`,
+    ips: [`172.16.${Math.floor(index / 128)}.${index + 10}`],
+    typeCode,
+    type: typeNames[typeCode],
+    groupName: index % 2 === 0 ? 'ЦОД' : 'Офис',
+    osVersion: typeCode === 2 ? 'IOS XE 17.9' : typeCode === 3 ? 'Ubuntu 22.04' : 'Windows 11',
+    isActive: index % 6 !== 0,
+    createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
+  };
+});
+
+const dashboardDemoAuditLogs: AuditLog[] = Array.from({ length: 14 }, (_, index) => ({
+  id: 30_000 + index,
+  userId: index % 2 === 0 ? 'admin' : 'operator',
+  actionType: ['DEPLOY_CONFIG', 'ROLLBACK', 'LOGIN', 'SCAN'][index % 4],
+  targetDeviceId: dashboardDemoDevices[index % dashboardDemoDevices.length].id,
+  status: index % 5 === 0 ? 'FAILED' : index % 3 === 0 ? 'RUNNING' : 'SUCCESS',
+  createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
 }));
 
 export default function DashboardPage() {
@@ -67,26 +85,35 @@ export default function DashboardPage() {
     try {
       // Загрузка устройств
       const devicesRes = await devicesApi.getAll();
-      setDevices(devicesRes.data);
-
-      // Обновление количества по типам
-      chartData.forEach(item => item.count = 0);
-      devicesRes.data.forEach(device => {
-        const typeKey = Object.keys(deviceTypeInfo)[device.typeCode!] || 'unknown';
-        const existingItem = chartData.find(i => i.typeKey === typeKey);
-        if (existingItem) existingItem.count++;
-      });
+      const mergedDevices = [
+        ...devicesRes.data,
+        ...dashboardDemoDevices.filter((demoDevice) => !devicesRes.data.some((device) => device.id === demoDevice.id)),
+      ];
+      setDevices(mergedDevices);
 
       // Загрузка последних 10 логов аудита
       const logsRes = await auditApi.getLogs({ size: 10 });
-      setAuditLogs(logsRes.data);
+      const mergedLogs = [
+        ...logsRes.data,
+        ...dashboardDemoAuditLogs.filter((demoLog) => !logsRes.data.some((log) => log.id === demoLog.id)),
+      ];
+      setAuditLogs(mergedLogs);
 
     } catch (err) {
+      setDevices(dashboardDemoDevices);
+      setAuditLogs(dashboardDemoAuditLogs);
       console.error('Ошибка загрузки данных:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  const chartData = useMemo(() => Object.entries(deviceTypeInfo).map(([typeKey, info]) => ({
+    typeKey,
+    name: info.name,
+    count: devices.filter((device) => Object.keys(deviceTypeInfo)[device.typeCode!] === typeKey).length,
+    color: info.color,
+  })), [devices]);
 
   // Данные для круговой диаграммы
   const pieData = {
@@ -178,8 +205,7 @@ export default function DashboardPage() {
                 <Statistic
                   title="Сетевое оборудование"
                   value={
-                    (chartData.find(d => d.typeKey === 'cisco_switch')?.count || 0) + 
-                    (chartData.find(d => d.typeKey === 'cisco_router')?.count || 0)
+                    chartData.find(d => d.typeKey === 'cisco_switch')?.count || 0
                   }
                   suffix={<Tag color="#fa8b0f">Сеть</Tag>}
                 />
