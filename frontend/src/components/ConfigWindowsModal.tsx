@@ -1,5 +1,5 @@
+import { Button, Form, Input, Modal } from 'antd';
 import React from 'react';
-import { Modal, Form, Input, Button } from 'antd';
 
 interface Props {
   open: boolean;
@@ -10,9 +10,12 @@ interface Props {
 export default function ConfigWindowsModal({ open, onClose, hostname }: Props) {
   return (
     <Modal title={`Windows config: ${hostname || 'device'}`} open={open} onCancel={onClose} footer={null} destroyOnClose>
-      <Form layout="vertical">
-        <Form.Item label="PowerShell command" name="ps" rules={[{ required: true }]}>
-          <Input.TextArea rows={5} placeholder="Set-ItemProperty ..." />
+      <Form layout="vertical" initialValues={{ option: 'HKLM:\\Software\\ConfigManager\\AutoUpdate', value: 'Enabled' }}>
+        <Form.Item label="Опция" name="option" rules={[{ required: true }]}>
+          <Input placeholder="ключ или путь настройки" />
+        </Form.Item>
+        <Form.Item label="Значение" name="value" rules={[{ required: true }]}>
+          <Input.TextArea rows={3} placeholder="значение настройки" />
         </Form.Item>
         <Button type="primary">Применить через WinRM</Button>
       </Form>

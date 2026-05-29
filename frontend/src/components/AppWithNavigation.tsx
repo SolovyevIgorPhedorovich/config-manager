@@ -71,6 +71,11 @@ function AppWithNavigation() {
         alignItems: 'center',
         justifyContent: 'space-between',
         boxShadow: '0 8px 24px rgba(15, 23, 42, 0.18)',
+        left: 0,
+        position: 'fixed',
+        right: 0,
+        top: 0,
+        zIndex: 1000,
       }}>
         <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#fff' }}>
           🖥️ IT Configuration Manager
@@ -95,7 +100,7 @@ function AppWithNavigation() {
         </Dropdown>
       </Header>
 
-      <Layout>
+      <Layout style={{ paddingTop: 64 }}>
         <Sider
           width={260}
           collapsedWidth={80}

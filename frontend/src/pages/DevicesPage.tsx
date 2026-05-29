@@ -160,6 +160,7 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [terminalCommand, setTerminalCommand] = useState('');
   const [terminalConnected, setTerminalConnected] = useState(false);
   const [deviceSearch, setDeviceSearch] = useState('');
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<React.Key[]>([]);
   const [auditDateRange, setAuditDateRange] = useState<[any, any] | null>(null);
   const [auditDeviceType, setAuditDeviceType] = useState<string>();
   const [auditResponsible, setAuditResponsible] = useState<string>();
@@ -335,6 +336,10 @@ export default function DevicesPage({ type }: { type?: string }) {
   const selectedConfigVersion = useMemo(() => (
     configVersions.find((config) => config.id === selectedConfigVersionId) || configVersions[0]
   ), [configVersions, selectedConfigVersionId]);
+
+  const currentConfigOptions = useMemo(() => (
+    (selectedConfigVersion?.newConfig || currentConfig).split('\n').map((line) => ({ ...parseConfigLine(line), status: 'unchanged' as const }))
+  ), [selectedConfigVersion]);
 
   const handleTransferLine = (line: DiffLine, sourceIndex: number) => {
     setTransferredLines((prev) => ({ ...prev, [sourceIndex]: { ...line, status: 'added' } }));
@@ -614,8 +619,26 @@ export default function DevicesPage({ type }: { type?: string }) {
                 <Empty description="Нет устройств для отображения" />
               ) : (
                 <Card>
+                  <Space wrap style={{ marginBottom: 16 }}>
+                    <Text strong>Выбрано устройств: {selectedDeviceIds.length}</Text>
+                    <Button
+                      disabled={selectedDeviceIds.length === 0}
+                      icon={<FileDoneOutlined />}
+                      type="primary"
+                      onClick={() => message.success(`Массовое применение настроек запущено для ${selectedDeviceIds.length} устройств`)}
+                    >
+                      Применить настройки
+                    </Button>
+                    <Button disabled={selectedDeviceIds.length === 0} onClick={() => setSelectedDeviceIds([])}>
+                      Сбросить выбор
+                    </Button>
+                  </Space>
                   <Table
                     rowKey="id"
+                    rowSelection={{
+                      selectedRowKeys: selectedDeviceIds,
+                      onChange: setSelectedDeviceIds,
+                    }}
                     columns={deviceColumns}
                     dataSource={filteredDevices}
                     pagination={{
@@ -643,12 +666,15 @@ export default function DevicesPage({ type }: { type?: string }) {
                       key: 'current',
                       label: 'Текущая',
                       children: (
-                        <pre style={{ background: '#111', color: '#7CFC00', padding: 12 }}>
-                          {`hostname ${selectedDevice?.hostname || 'Device01'}
-interface Gi0/1
- ip address 10.0.0.1 255.255.255.0
- no shutdown`}
-                        </pre>
+                        <Card size="small" styles={{ body: { padding: 0 } }}>
+                          <div style={{ background: '#111', borderRadius: 8, overflow: 'hidden' }}>
+                            {currentConfigOptions.map((line, index) => (
+                              <div key={`${line.option}-${index}`} style={{ color: '#7CFC00', fontFamily: 'monospace', padding: '4px 12px' }}>
+                                <Text strong style={{ color: '#7CFC00' }}>{line.option}</Text>: {line.value}
+                              </div>
+                            ))}
+                          </div>
+                        </Card>
                       ),
                     },
                     {
@@ -751,7 +777,24 @@ interface Gi0/1
                     {
                       key: 'templates',
                       label: 'Шаблоны',
-                      children: <Paragraph>Шаблоны baseline для типов устройств.</Paragraph>,
+                      children: (
+                        <Card title="Пример шаблона baseline" size="small">
+                          <Space direction="vertical" style={{ width: '100%' }}>
+                            <Paragraph>Шаблон можно применить к выбранным устройствам из списка устройств.</Paragraph>
+                            {[
+                              { option: 'hostname.prefix', value: 'office-' },
+                              { option: 'interface.uplink.description', value: 'Managed by Config Manager' },
+                              { option: 'logging.buffered', value: '8192' },
+                              { option: 'snmp.location', value: 'Main Office' },
+                            ].map((item) => (
+                              <div key={item.option} style={{ background: '#f8fafc', borderRadius: 6, padding: '8px 12px' }}>
+                                <Text strong>{item.option}</Text>: {item.value}
+                              </div>
+                            ))}
+                            <Button icon={<FileDoneOutlined />} type="primary">Применить шаблон</Button>
+                          </Space>
+                        </Card>
+                      ),
                     },
                   ]}
                 />
