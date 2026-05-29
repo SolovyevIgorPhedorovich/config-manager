@@ -625,7 +625,53 @@ interface Gi0/1
                     {
                       key: 'history',
                       label: 'История',
-                      children: <Paragraph>Версии конфигурации за последние 30 дней.</Paragraph>,
+                      children: (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          <Paragraph>Версии конфигурации за последние 30 дней.</Paragraph>
+                          <Table
+                            rowKey={(record) => record.id || record.versionNumber}
+                            columns={[
+                              { title: '№', dataIndex: 'id', key: 'id' },
+                              { title: 'Версия', dataIndex: 'versionNumber', key: 'versionNumber' },
+                              {
+                                title: 'Дата применения',
+                                dataIndex: 'appliedAt',
+                                key: 'appliedAt',
+                                render: (value?: string) => value ? new Date(value).toLocaleString('ru-RU') : 'без даты',
+                              },
+                              {
+                                title: 'Тип конфигурации',
+                                dataIndex: 'configType',
+                                key: 'configType',
+                                render: (value: number) => <Tag color="blue">{value}</Tag>,
+                              },
+                              {
+                                title: 'Откат',
+                                dataIndex: 'rollbackAvailable',
+                                key: 'rollbackAvailable',
+                                render: (value: boolean) => <Tag color={value ? 'success' : 'default'}>{value ? 'доступен' : 'недоступен'}</Tag>,
+                              },
+                              {
+                                title: 'Действия',
+                                key: 'actions',
+                                render: (_, record: ConfigVersion) => (
+                                  <Button
+                                    type={record.id === selectedConfigVersionId ? 'primary' : 'default'}
+                                    onClick={() => {
+                                      setSelectedConfigVersionId(record.id!);
+                                      setTransferredLines([]);
+                                    }}
+                                  >
+                                    Открыть в сравнении
+                                  </Button>
+                                ),
+                              },
+                            ]}
+                            dataSource={configVersions}
+                            pagination={false}
+                          />
+                        </Space>
+                      ),
                     },
                     {
                       key: 'compare',
