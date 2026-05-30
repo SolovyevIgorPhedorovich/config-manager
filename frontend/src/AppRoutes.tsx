@@ -28,6 +28,24 @@ export const AppRoutes = () => {
         </ProtectedRoute>
       } />
 
+      <Route path="/admin" element={
+        <ProtectedRoute>
+          <AppWithNavigation />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/admin/settings" element={
+        <ProtectedRoute>
+          <AppWithNavigation />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/admin/audit" element={
+        <ProtectedRoute>
+          <AppWithNavigation />
+        </ProtectedRoute>
+      } />
+
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );

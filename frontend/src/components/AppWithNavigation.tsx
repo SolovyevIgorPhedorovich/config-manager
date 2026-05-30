@@ -4,6 +4,8 @@ import {
   HomeOutlined,
   ToolOutlined,
   FolderOpenOutlined,
+  SettingOutlined,
+  AuditOutlined,
   LogoutOutlined,
   UserOutlined,
 } from '@ant-design/icons';
@@ -12,6 +14,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import DevicesPage from '../pages/DevicesPage';
 import AdminPage from '../pages/AdminPage';
 import DashboardPage from '../pages/DashboardPage';
+import AuditPage from '../pages/AuditPage';
 
 const { Header, Content, Sider } = Layout;
 const { SubMenu } = Menu;
@@ -162,9 +165,18 @@ function AppWithNavigation() {
               </Menu.Item>
             </SubMenu>
 
-            <Menu.Item key="/admin" icon={<ToolOutlined />}>
-              <Link to="/admin">Администрирование</Link>
-            </Menu.Item>
+            <SubMenu
+              key="admin"
+              icon={<ToolOutlined />}
+              title="Администрирование"
+            >
+              <Menu.Item key="/admin/settings" icon={<SettingOutlined />} style={{ margin: '4px 8px', borderRadius: 10 }}>
+                <Link to="/admin/settings">Настройка</Link>
+              </Menu.Item>
+              <Menu.Item key="/admin/audit" icon={<AuditOutlined />} style={{ margin: '4px 8px', borderRadius: 10 }}>
+                <Link to="/admin/audit">Аудит</Link>
+              </Menu.Item>
+            </SubMenu>
           </Menu>
         </Sider>
 
@@ -174,8 +186,14 @@ function AppWithNavigation() {
             {location.pathname.includes('/devices') && (
               <Breadcrumb.Item>Устройства</Breadcrumb.Item>
             )}
-            {location.pathname === '/admin' && (
+            {location.pathname.startsWith('/admin') && (
               <Breadcrumb.Item>Администрирование</Breadcrumb.Item>
+            )}
+            {location.pathname === '/admin/settings' && (
+              <Breadcrumb.Item>Настройка</Breadcrumb.Item>
+            )}
+            {location.pathname === '/admin/audit' && (
+              <Breadcrumb.Item>Аудит</Breadcrumb.Item>
             )}
           </Breadcrumb>
 
@@ -188,7 +206,8 @@ function AppWithNavigation() {
             {location.pathname.startsWith('/devices') && (
               <DevicesPage type={location.pathname.split('/')[2]} />
             )}
-            {location.pathname === '/admin' && <AdminPage />}
+            {(location.pathname === '/admin' || location.pathname === '/admin/settings') && <AdminPage />}
+            {location.pathname === '/admin/audit' && <AuditPage />}
           </Content>
         </Layout>
       </Layout>
