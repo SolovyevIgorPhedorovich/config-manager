@@ -3,6 +3,9 @@ import { Card, Form, Input, Switch, Button, message, Tabs, InputNumber, Modal, S
 
 const { TabPane } = Tabs;
 
+const settingsCardStyle = { height: '100%', width: '100%' };
+const settingsCardBodyStyle = { display: 'flex', flexDirection: 'column' as const, height: '100%' };
+
 export default function AdminPage() {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -77,9 +80,9 @@ export default function AdminPage() {
         {/* Общие настройки */}
         <TabPane tab="⚙️ Общие настройки" key="1">
           <Form form={form} layout="vertical" onFinish={handleSubmit}>
-            <Row gutter={[16, 16]}>
-              <Col xs={24} lg={12}>
-                <Card title="Настройки резервного копирования конфигураций">
+            <Row gutter={[16, 16]} align="stretch">
+              <Col xs={24} lg={12} style={{ display: 'flex' }}>
+                <Card title="Настройки резервного копирования конфигураций" style={settingsCardStyle} styles={{ body: settingsCardBodyStyle }}>
                   <Form.Item name="backupEnabled" label="Автоматическое резервное копирование" valuePropName="checked">
                     <Switch checkedChildren="Вкл" unCheckedChildren="Выкл" />
                   </Form.Item>
@@ -104,8 +107,8 @@ export default function AdminPage() {
                 </Card>
               </Col>
 
-              <Col xs={24} lg={12}>
-                <Card title="Настройки аудита и журналирования">
+              <Col xs={24} lg={12} style={{ display: 'flex' }}>
+                <Card title="Настройки аудита и журналирования" style={settingsCardStyle} styles={{ body: settingsCardBodyStyle }}>
                   <Form.Item name="loggingLevel" label="Уровень логирования" rules={[{ required: true }]}>
                     <Select options={[{ value: 'DEBUG' }, { value: 'INFO' }, { value: 'WARN' }, { value: 'ERROR' }]} />
                   </Form.Item>
@@ -121,8 +124,8 @@ export default function AdminPage() {
                 </Card>
               </Col>
 
-              <Col xs={24} lg={12}>
-                <Card title="Настройки безопасности">
+              <Col xs={24} lg={12} style={{ display: 'flex' }}>
+                <Card title="Настройки безопасности" style={settingsCardStyle} styles={{ body: settingsCardBodyStyle }}>
                   <Form.Item name="sessionLifetimeMinutes" label="Время жизни пользовательской сессии (минут)" rules={[{ required: true, type: 'number', min: 5 }]}>
                     <InputNumber min={5} style={{ width: '100%' }} />
                   </Form.Item>
@@ -132,8 +135,8 @@ export default function AdminPage() {
                 </Card>
               </Col>
 
-              <Col xs={24} lg={12}>
-                <Card title="Настройки очередей и фоновых задач">
+              <Col xs={24} lg={12} style={{ display: 'flex' }}>
+                <Card title="Настройки очередей и фоновых задач" style={settingsCardStyle} styles={{ body: settingsCardBodyStyle }}>
                   <Form.Item name="workerThreads" label="Количество потоков обработки" rules={[{ required: true, type: 'number', min: 1 }]}>
                     <InputNumber min={1} style={{ width: '100%' }} />
                   </Form.Item>
@@ -152,9 +155,9 @@ export default function AdminPage() {
                 </Card>
               </Col>
 
-              <Col xs={24}>
-                <Card title="Настройки устройств по умолчанию">
-                  <Row gutter={16}>
+              <Col xs={24} style={{ display: 'flex' }}>
+                <Card title="Настройки устройств по умолчанию" style={settingsCardStyle} styles={{ body: settingsCardBodyStyle }}>
+                  <Row gutter={16} style={{ width: '100%' }}>
                     <Col xs={24} md={8}>
                       <Form.Item name="sshTimeoutSeconds" label="Таймаут подключения SSH (секунд)" rules={[{ required: true, type: 'number', min: 1 }]}>
                         <InputNumber min={1} style={{ width: '100%' }} />
