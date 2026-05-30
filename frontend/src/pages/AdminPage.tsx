@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { Card, Form, Input, Switch, Button, message, Tabs, InputNumber, Modal } from 'antd';
-import { Settings } from '../types';
+import { Card, Form, Input, Switch, Button, message, Tabs, InputNumber, Modal, Select, Row, Col } from 'antd';
 
 const { TabPane } = Tabs;
+
+const settingsCardStyle = { height: '100%', width: '100%' };
+const settingsCardBodyStyle = { display: 'flex', flexDirection: 'column' as const, height: '100%' };
 
 export default function AdminPage() {
   const [form] = Form.useForm();
@@ -12,9 +14,28 @@ export default function AdminPage() {
 
   React.useEffect(() => {
     form.setFieldsValue({
-      apiUrl: 'http://localhost:8080/api',
-      autoRefreshInterval: 30,
-      enableNotifications: true,
+      backupEnabled: true,
+      configCollectionIntervalHours: 24,
+      backupTaskStartTime: '02:00',
+      configVersionRetentionDepth: 30,
+      obsoleteVersionPolicy: 'keep-last-successful',
+      loggingLevel: 'INFO',
+      auditRetentionDays: 180,
+      logSuccessfulLogins: true,
+      logFailedLogins: true,
+      sessionLifetimeMinutes: 60,
+      maxFailedLoginAttempts: 5,
+      workerThreads: 4,
+      redisHost: 'localhost',
+      redisPort: 6379,
+      retryIntervalSeconds: 60,
+      maxJobExecutionMinutes: 30,
+      sshTimeoutSeconds: 30,
+      winrmTimeoutSeconds: 45,
+      reconnectAttempts: 3,
+      snmpCommunity: 'public',
+      snmpVersion: '2c',
+      snmpTimeoutSeconds: 10,
       adEnabled: false,
       adUrl: 'ldap://dc.company.local:389',
       adBaseDn: 'DC=company,DC=local',
@@ -58,33 +79,124 @@ export default function AdminPage() {
       <Tabs defaultActiveKey="1">
         {/* Общие настройки */}
         <TabPane tab="⚙️ Общие настройки" key="1">
-          <Card title="Настройка подключения к backend">
-            <Form form={form} layout="vertical" onFinish={handleSubmit}>
-              <Form.Item
-                name="apiUrl"
-                label="URL API"
-                rules={[{ required: true }]}
-              >
-                <Input placeholder="http://localhost:8080/api" />
-              </Form.Item>
+          <Form form={form} layout="vertical" onFinish={handleSubmit}>
+            <Row gutter={[16, 16]} align="stretch">
+              <Col xs={24} lg={12} style={{ display: 'flex' }}>
+                <Card title="Настройки резервного копирования конфигураций" style={settingsCardStyle} styles={{ body: settingsCardBodyStyle }}>
+                  <Form.Item name="backupEnabled" label="Автоматическое резервное копирование" valuePropName="checked">
+                    <Switch checkedChildren="Вкл" unCheckedChildren="Выкл" />
+                  </Form.Item>
+                  <Form.Item name="configCollectionIntervalHours" label="Периодичность автоматического сбора конфигураций (часов)" rules={[{ required: true, type: 'number', min: 1 }]}>
+                    <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="backupTaskStartTime" label="Время запуска задач" rules={[{ required: true }]}>
+                    <Input placeholder="02:00" />
+                  </Form.Item>
+                  <Form.Item name="configVersionRetentionDepth" label="Глубина хранения версий" rules={[{ required: true, type: 'number', min: 1 }]}>
+                    <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="obsoleteVersionPolicy" label="Политика удаления устаревших версий" rules={[{ required: true }]}>
+                    <Select
+                      options={[
+                        { value: 'keep-last-successful', label: 'Хранить последние успешные версии' },
+                        { value: 'delete-after-retention', label: 'Удалять после истечения срока хранения' },
+                        { value: 'archive-before-delete', label: 'Архивировать перед удалением' },
+                      ]}
+                    />
+                  </Form.Item>
+                </Card>
+              </Col>
 
-              <Form.Item
-                name="autoRefreshInterval"
-                label="Интервал автообновления (сек)"
-                rules={[{ required: true, type: 'number', min: 5 }]}
-              >
-                <InputNumber min={5} style={{ width: '100%' }} />
-              </Form.Item>
+              <Col xs={24} lg={12} style={{ display: 'flex' }}>
+                <Card title="Настройки аудита и журналирования" style={settingsCardStyle} styles={{ body: settingsCardBodyStyle }}>
+                  <Form.Item name="loggingLevel" label="Уровень логирования" rules={[{ required: true }]}>
+                    <Select options={[{ value: 'DEBUG' }, { value: 'INFO' }, { value: 'WARN' }, { value: 'ERROR' }]} />
+                  </Form.Item>
+                  <Form.Item name="auditRetentionDays" label="Срок хранения аудита (дней)" rules={[{ required: true, type: 'number', min: 1 }]}>
+                    <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="logSuccessfulLogins" label="Запись успешных попыток входа" valuePropName="checked">
+                    <Switch />
+                  </Form.Item>
+                  <Form.Item name="logFailedLogins" label="Запись неуспешных попыток входа" valuePropName="checked">
+                    <Switch />
+                  </Form.Item>
+                </Card>
+              </Col>
 
-              <Form.Item name="enableNotifications" label="Уведомления" valuePropName="checked">
-                <Switch defaultChecked />
-              </Form.Item>
+              <Col xs={24} lg={12} style={{ display: 'flex' }}>
+                <Card title="Настройки безопасности" style={settingsCardStyle} styles={{ body: settingsCardBodyStyle }}>
+                  <Form.Item name="sessionLifetimeMinutes" label="Время жизни пользовательской сессии (минут)" rules={[{ required: true, type: 'number', min: 5 }]}>
+                    <InputNumber min={5} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="maxFailedLoginAttempts" label="Количество неудачных попыток входа" rules={[{ required: true, type: 'number', min: 1 }]}>
+                    <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Card>
+              </Col>
 
-              <Button type="primary" htmlType="submit" loading={loading}>
-                Сохранить
-              </Button>
-            </Form>
-          </Card>
+              <Col xs={24} lg={12} style={{ display: 'flex' }}>
+                <Card title="Настройки очередей и фоновых задач" style={settingsCardStyle} styles={{ body: settingsCardBodyStyle }}>
+                  <Form.Item name="workerThreads" label="Количество потоков обработки" rules={[{ required: true, type: 'number', min: 1 }]}>
+                    <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="redisHost" label="Redis host" rules={[{ required: true }]}>
+                    <Input placeholder="localhost" />
+                  </Form.Item>
+                  <Form.Item name="redisPort" label="Redis port" rules={[{ required: true, type: 'number', min: 1, max: 65535 }]}>
+                    <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="retryIntervalSeconds" label="Интервалы повторных попыток (секунд)" rules={[{ required: true, type: 'number', min: 1 }]}>
+                    <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="maxJobExecutionMinutes" label="Максимальное время выполнения задания (минут)" rules={[{ required: true, type: 'number', min: 1 }]}>
+                    <InputNumber min={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Card>
+              </Col>
+
+              <Col xs={24} style={{ display: 'flex' }}>
+                <Card title="Настройки устройств по умолчанию" style={settingsCardStyle} styles={{ body: settingsCardBodyStyle }}>
+                  <Row gutter={16} style={{ width: '100%' }}>
+                    <Col xs={24} md={8}>
+                      <Form.Item name="sshTimeoutSeconds" label="Таймаут подключения SSH (секунд)" rules={[{ required: true, type: 'number', min: 1 }]}>
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={8}>
+                      <Form.Item name="winrmTimeoutSeconds" label="Таймаут WinRM (секунд)" rules={[{ required: true, type: 'number', min: 1 }]}>
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={8}>
+                      <Form.Item name="reconnectAttempts" label="Количество повторных подключений" rules={[{ required: true, type: 'number', min: 0 }]}>
+                        <InputNumber min={0} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={8}>
+                      <Form.Item name="snmpCommunity" label="SNMP community" rules={[{ required: true }]}>
+                        <Input placeholder="public" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={8}>
+                      <Form.Item name="snmpVersion" label="SNMP version" rules={[{ required: true }]}>
+                        <Select options={[{ value: '1', label: 'v1' }, { value: '2c', label: 'v2c' }, { value: '3', label: 'v3' }]} />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={8}>
+                      <Form.Item name="snmpTimeoutSeconds" label="SNMP timeout (секунд)" rules={[{ required: true, type: 'number', min: 1 }]}>
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Card>
+              </Col>
+            </Row>
+
+            <Button type="primary" htmlType="submit" loading={loading} style={{ marginTop: 16 }}>
+              Сохранить общие настройки
+            </Button>
+          </Form>
         </TabPane>
 
         {/* Настройки AD */}
