@@ -1,11 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Card, Table, Tag, Space, Typography, Row, Col, Statistic,
-  Empty, Alert
+  Card, Table, Tag, Typography, Row, Col, Statistic,
+  Empty
 } from 'antd';
-import {
-  Pie, Bar, Line
-} from 'react-chartjs-2';
+import { Pie, Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   ArcElement,
@@ -27,32 +25,36 @@ import type { Device, AuditLog } from '../types';
 const { Title, Text } = Typography;
 
 ChartJS.register(
-    ArcElement,
-    Tooltip,
-    Legend,
-    CategoryScale,
-    LinearScale,
-    ChartTitle,
-    BarController,
-    LineController,
-    PointElement,
-    LineElement
+  ArcElement,
+  Tooltip,
+  Legend,
+  CategoryScale,
+  LinearScale,
+  ChartTitle,
+  BarController,
+  LineController,
+  PointElement,
+  LineElement
 );
 
-const deviceTypeInfo: Record<string, { name: string; color: string }> = {
-  windows: { name: 'ПК', color: '#1890ff' },
-  linux: { name: 'МФУ', color: '#52c41a' },
-  cisco_switch: { name: 'Cisco', color: '#fa8b0f' },
-  proxmox: { name: 'VM', color: '#f53f3f' },
-};
+const dashboardCategories = [
+  { key: 'windows', name: 'Windows', color: '#1890ff' },
+  { key: 'linux', name: 'Linux', color: '#722ed1' },
+  { key: 'mfu', name: 'МФУ', color: '#52c41a' },
+  { key: 'cisco', name: 'Cisco', color: '#fa8b0f' },
+  { key: 'proxmox', name: 'Proxmox', color: '#f53f3f' },
+] as const;
 
-// Преобразуем типы в массив для диаграммы
-const chartData = Object.entries(deviceTypeInfo).map(([typeKey, info]) => ({
-  typeKey,
-  name: info.name,
-  count: 0,
-  color: info.color,
-}));
+const getDeviceCategory = (device: Device) => {
+  const type = (device.type || '').toLowerCase();
+  const osVersion = (device.osVersion || '').toLowerCase();
+
+  if (device.typeCode === 1 || type.includes('мфу')) return 'mfu';
+  if (device.typeCode === 2 || type.includes('cisco')) return 'cisco';
+  if (device.typeCode === 3 || type.includes('vm') || osVersion.includes('proxmox')) return 'proxmox';
+  if (osVersion.includes('linux') || osVersion.includes('ubuntu') || osVersion.includes('debian')) return 'linux';
+  return 'windows';
+};
 
 export default function DashboardPage() {
   const [devices, setDevices] = useState<Device[]>([]);
@@ -65,30 +67,30 @@ export default function DashboardPage() {
 
   const loadData = async () => {
     try {
-      // Загрузка устройств
       const devicesRes = await devicesApi.getAll();
       setDevices(devicesRes.data);
 
-      // Обновление количества по типам
-      chartData.forEach(item => item.count = 0);
-      devicesRes.data.forEach(device => {
-        const typeKey = Object.keys(deviceTypeInfo)[device.typeCode!] || 'unknown';
-        const existingItem = chartData.find(i => i.typeKey === typeKey);
-        if (existingItem) existingItem.count++;
-      });
-
-      // Загрузка последних 10 логов аудита
       const logsRes = await auditApi.getLogs({ size: 10 });
       setAuditLogs(logsRes.data);
-
     } catch (err) {
+      setDevices([]);
+      setAuditLogs([]);
       console.error('Ошибка загрузки данных:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Данные для круговой диаграммы
+  const chartData = useMemo(() =>
+    dashboardCategories.map((category) => ({
+      typeKey: category.key,
+      name: category.name,
+      count: devices.filter((device) => getDeviceCategory(device) === category.key).length,
+      color: category.color,
+    })),
+    [devices]
+  );
+
   const pieData = {
     labels: chartData.map(d => d.name),
     datasets: [
@@ -100,18 +102,17 @@ export default function DashboardPage() {
     ],
   };
 
-  // Данные для линейного графика (последние изменения)
   const lineData = {
     labels: auditLogs.slice(0, 7).map(log =>
-        new Date(log.createdAt!).toLocaleDateString('ru-RU')
+      new Date(log.createdAt!).toLocaleDateString('ru-RU')
     ),
     datasets: [
-        {
-            label: 'Количество изменений',
-            data: Array(auditLogs.slice(0, 7).length).fill(1),
-            borderColor: '#1890ff',
-            tension: 0.3,
-        },
+      {
+        label: 'Количество изменений',
+        data: Array(auditLogs.slice(0, 7).length).fill(1),
+        borderColor: '#1890ff',
+        tension: 0.3,
+      },
     ],
   };
 
@@ -136,14 +137,16 @@ export default function DashboardPage() {
     { title: 'Время', dataIndex: 'createdAt', key: 'createdAt' },
   ];
 
-   // Статистика
   const totalDevices = devices.length;
+  const pcCount = devices.filter((device) => device.typeCode === 0 || device.type === 'ПК').length;
+  const linuxCount = chartData.find(d => d.typeKey === 'linux')?.count || 0;
   const windowsCount = chartData.find(d => d.typeKey === 'windows')?.count || 0;
+  const mfuCount = chartData.find(d => d.typeKey === 'mfu')?.count || 0;
+  const proxmoxCount = chartData.find(d => d.typeKey === 'proxmox')?.count || 0;
   const errorCount = auditLogs.filter(l => l.status === 'FAILED').length;
 
   return (
     <div style={{ padding: '24px' }}>
-      {/* Заголовок */}
       <Title level={2}>📊 Панель управления</Title>
       <Text type="secondary">Общая информация о состоянии ИТ-инфраструктуры</Text>
 
@@ -153,86 +156,58 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
-          {/* Статистические карточки */}
-          <Row gutter={16} style={{ marginBottom: 24 }}>
-            <Col xs={24} sm={12} md={6}>
+          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+            <Col xs={24} sm={12} md={8} xl={4}>
               <Card>
-                <Statistic
-                  title="Всего устройств"
-                  value={totalDevices}
-                  suffix={<Tag color="#1890ff">всё</Tag>}
-                />
+                <Statistic title="Всего" value={totalDevices} />
               </Card>
             </Col>
-            <Col xs={24} sm={12} md={6}>
+
+            <Col xs={24} sm={12} md={8} xl={4}>
               <Card>
-                <Statistic
-                  title="Windows ПК"
-                  value={windowsCount}
-                  suffix={<Tag color="#1890ff">ОС</Tag>}
-                />
+                <Statistic title="ПК" value={pcCount} />
               </Card>
             </Col>
-            <Col xs={24} sm={12} md={6}>
+
+            <Col xs={24} sm={12} md={8} xl={4}>
               <Card>
-                <Statistic
-                  title="Сетевое оборудование"
-                  value={
-                    (chartData.find(d => d.typeKey === 'cisco_switch')?.count || 0) + 
-                    (chartData.find(d => d.typeKey === 'cisco_router')?.count || 0)
-                  }
-                  suffix={<Tag color="#fa8b0f">Сеть</Tag>}
-                />
+                <Statistic title="Linux" value={linuxCount} />
               </Card>
             </Col>
-            <Col xs={24} sm={12} md={6}>
+
+            <Col xs={24} sm={12} md={8} xl={4}>
               <Card>
-                <Statistic
-                  title="Ошибок за сутки"
-                  value={errorCount}
-                  suffix={<Tag color="warning">⚠️</Tag>}
-                  valueStyle={{ color: errorCount > 0 ? '#ff4d4f' : '#52c41a' }}
-                />
+                <Statistic title="Windows" value={windowsCount} />
+              </Card>
+            </Col>
+
+            <Col xs={24} sm={12} md={8} xl={4}>
+              <Card>
+                <Statistic title="МФУ" value={mfuCount} />
+              </Card>
+            </Col>
+
+            <Col xs={24} sm={12} md={8} xl={4}>
+              <Card>
+                <Statistic title="Proxmox" value={proxmoxCount} />
               </Card>
             </Col>
           </Row>
 
-          {/* Диаграммы и таблицы */}
           <Row gutter={16}>
             <Col xs={24} lg={12}>
               <Card title="🔄 Распределение по типам устройств">
-                <Pie
-                  data={pieData}
-                  options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                      legend: { position: 'right' },
-                    },
-                  }}
-                  height={300}
-                />
+                <Pie data={pieData} options={{ responsive: true, maintainAspectRatio: false }} height={300} />
               </Card>
             </Col>
 
             <Col xs={24} lg={12}>
               <Card title="📈 Динамика изменений (последние 7 дней)">
-                <Line
-                  data={lineData}
-                  options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                      y: { beginAtZero: true },
-                    },
-                  }}
-                  height={300}
-                />
+                <Line data={lineData} options={{ responsive: true, maintainAspectRatio: false }} height={300} />
               </Card>
             </Col>
           </Row>
 
-          {/* Таблица ошибок */}
           <Card
             title="❌ Ошибки"
             extra={

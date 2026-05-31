@@ -1,22 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Table, Space, Button, Tag, Empty, message, Tabs, AutoComplete, DatePicker, Select, Typography } from 'antd';
+import { Card, Table, Space, Button, Tag, Empty, message, Tabs, AutoComplete, DatePicker, Select, Typography, Input, Row, Col, Progress, Tooltip } from 'antd';
+import dayjs from 'dayjs';
 import { devicesApi } from '../api/devicesApi';
-import type { Device } from '../types';
-import SSHClient from '../components/SSHClient';
-import { CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined } from "@ant-design/icons"
+import { configApi } from '../api/configApi';
+import type { ConfigVersion, Device } from '../types';
+import SSHClient from '../components/DeviceTerminal';
+import { ArrowRightOutlined, CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined } from "@ant-design/icons"
 import { ScanDeviceModal } from '../components/ScanDeviceModal';
 import { AddDeviceModal } from '../components/AddDeviceModal';
-import { ScanOption } from "../types"
 import { ScanProgress } from '../components/ScanProgress';
 import { ColumnsType } from 'antd/es/table';
 import ConfigLinuxModal from '../components/ConfigLinuxModal';
 import ConfigWindowsModal from '../components/ConfigWindowsModal';
 import ConfigMFUModal from '../components/ConfigMFUModal';
 import ConfigCiscoModal from '../components/ConfigCiscoModal';
-
+import DeviceTerminal from '../components/DeviceTerminal';
 
 const { Text, Paragraph } = Typography;
-
+const { Search } = Input;
 
 const deviceTypeInfo: Record<string, { name: string; color: string; code: number }> = {
   ПК: { name: 'ПК', color: '#1890ff', code: 0 },
@@ -36,59 +37,149 @@ const routeTypeMap: Record<string, keyof typeof deviceTypeInfo> = {
 type DeviceRuntimeStatus = 'online' | 'offline' | 'error';
 const commandSuggestions = ['show running-config', 'show version', 'ipconfig /all', 'hostname', 'reload'];
 
+const parseConfigLine = (line: string) => {
+  const trimmed = line.trim();
+  const [first = '', second = '', ...rest] = trimmed.split(/\s+/);
+  if (!trimmed) return { option: 'пустая строка', value: '—', raw: line };
+  if (first === 'hostname') return { option: 'hostname', value: [second, ...rest].join(' '), raw: line };
+  if (first === 'interface') return { option: 'interface', value: [second, ...rest].join(' '), raw: line };
+  if (first === 'description') return { option: 'description', value: [second, ...rest].join(' '), raw: line };
+  if (first === 'ip' && second === 'address') return { option: 'ip address', value: rest.join(' '), raw: line };
+  if (first === 'no' && second === 'shutdown') return { option: 'shutdown', value: 'disabled', raw: line };
+  if (first === 'shutdown') return { option: 'shutdown', value: 'enabled', raw: line };
+  if (first === 'router') return { option: `router ${second}`, value: rest.join(' '), raw: line };
+  if (first === 'network') return { option: 'network', value: [second, ...rest].join(' '), raw: line };
+  if (first === 'service') return { option: `service ${second}`, value: rest.join(' '), raw: line };
+  if (first === 'logging') return { option: `logging ${second}`, value: rest.join(' '), raw: line };
+  return { option: first, value: [second, ...rest].join(' ') || 'enabled', raw: line };
+};
+
+const buildPanelDiff = (previous: string, current: string) => {
+  const previousLines = previous.split('\n');
+  const currentLines = current.split('\n');
+  return {
+    previous: previousLines.map((line) => ({ ...parseConfigLine(line), status: currentLines.includes(line) ? 'unchanged' : 'removed' })),
+    current: currentLines.map((line) => ({ ...parseConfigLine(line), status: previousLines.includes(line) ? 'unchanged' : 'added' })),
+  };
+};
+
 export default function DevicesPage({ type }: { type?: string }) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null); 
+  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [showSSH, setShowSSH] = useState(false);
   const [showScan, setShowScan] = useState(false);
   const [showAddDevice, setShowAddDevice] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [terminalCommand, setTerminalCommand] = useState('');
+  const [terminalConnected, setTerminalConnected] = useState(false);
+  const [deviceSearch, setDeviceSearch] = useState('');
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<React.Key[]>([]);
+  const [configVersions, setConfigVersions] = useState<ConfigVersion[]>([]);
+  const [selectedConfigVersionId, setSelectedConfigVersionId] = useState<number>();
+  const [transferredLines, setTransferredLines] = useState<Record<number, any>>({});
+
+  // Модалки конфигурации
   const [linuxModalOpen, setLinuxModalOpen] = useState(false);
   const [windowsModalOpen, setWindowsModalOpen] = useState(false);
   const [mfuModalOpen, setMfuModalOpen] = useState(false);
   const [ciscoModalOpen, setCiscoModalOpen] = useState(false);
 
+  // Загрузка устройств
   useEffect(() => {
     loadDevices();
   }, [type]);
 
-  const runtimeStatus = (device: Device): DeviceRuntimeStatus => {
-    if (device.isActive) return 'online';
-    return device.hostname.toLowerCase().includes('err') ? 'error' : 'offline';
-  };
-
-  const statusColor = (status: DeviceRuntimeStatus) => (status === 'online' ? 'success' : status === 'offline' ? 'default' : 'error');
-  const statusText = (status: DeviceRuntimeStatus) => (status === 'online' ? 'Онлайн' : status === 'offline' ? 'Оффлайн' : 'Ошибка');
+  // Загрузка версий конфигурации при выборе устройства
+  useEffect(() => {
+    if (selectedDevice?.id) {
+      loadConfigVersions(selectedDevice.id);
+    } else {
+      setConfigVersions([]);
+      setSelectedConfigVersionId(undefined);
+      setTransferredLines({});
+    }
+  }, [selectedDevice]);
 
   const loadDevices = async () => {
+    setLoading(true);
     try {
       const res = await devicesApi.getAll();
-
+      let list = res.data;
+      
+      // Добавить тестовые данные для демонстрации (удалить в production)
+      list = list.map(device => {
+        // Для ПК без ОС добавляем тестовую
+        if (!device.operatingSystem && device.typeCode === 0) {
+          return { ...device, operatingSystem: 'windows', model: device.model || 'OptiPlex 7090' };
+        }
+        // Для VM без ОС
+        if (!device.operatingSystem && device.typeCode === 3) {
+          return { ...device, operatingSystem: 'linux', model: device.model || 'VMware VM' };
+        }
+        // Для МФУ без производителя
+        if (!device.manufacturer && device.typeCode === 1) {
+          return { ...device, manufacturer: 'HP', model: device.model || 'LaserJet Pro M428fdw' };
+        }
+        return device;
+      });
+      
+      // Фильтр по типу, если передан через роутинг
       const mappedType = type ? routeTypeMap[type] : undefined;
-
       if (mappedType) {
         const expectedCode = deviceTypeInfo[mappedType].code;
-        setDevices(res.data.filter((d) => d.type === mappedType || d.typeCode === expectedCode));
-
-      } else {
-        setDevices(res.data);
+        list = list.filter((device) => device.type === mappedType || device.typeCode === expectedCode);
       }
+      setDevices(list);
     } catch (err) {
       message.error('Ошибка загрузки устройств');
+      setDevices([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDelete = (id?: number) => {
-    if (!id) return;
-    setDevices((prev) => prev.filter((d) => d.id !== id));
-    message.success("Устройство удалено");
-  }
+  const loadConfigVersions = async (deviceId: number) => {
+    try {
+      const res = await devicesApi.getHistory(deviceId);
+      const versions = res.data || [];
+      setConfigVersions(versions);
+      if (versions.length > 0) {
+        setSelectedConfigVersionId(versions[0].id);
+      } else {
+        setSelectedConfigVersionId(undefined);
+      }
+      setTransferredLines({});
+    } catch (err) {
+      message.error('Ошибка загрузки истории конфигураций');
+      setConfigVersions([]);
+    }
+  };
 
+  const handleDelete = async (id?: number) => {
+    if (!id) return;
+    try {
+      await devicesApi.delete(id, 'current-user');
+      message.success('Устройство удалено');
+      setDevices((prev) => prev.filter((d) => d.id !== id));
+    } catch (err) {
+      message.error('Ошибка удаления устройства');
+    }
+  };
+
+  const runtimeStatus = (device: Device): DeviceRuntimeStatus => {
+    // Здесь можно вызывать API для проверки статуса, пока заглушка
+    return device.isActive ? 'online' : 'offline';
+  };
+
+  const statusColor = (status: DeviceRuntimeStatus) => (status === 'online' ? 'success' : status === 'offline' ? 'default' : 'error');
+  const statusText = (status: DeviceRuntimeStatus) => (status === 'online' ? 'Онлайн' : status === 'offline' ? 'Оффлайн' : 'Ошибка');
+
+  // Прогресс применения – получаем из API по deviceId (можно добавить эндпоинт)
+  const getActionProgress = (device: Device) => 0; // пока заглушка
+
+  // Обновленные колонки таблицы с отображением ОС и производителя
   const deviceColumns: ColumnsType<Device> = [
     { title: 'IP-адрес', key: 'ip', render: (_, record) => record.ips?.[0] || '—' },
     { title: 'Имя устройства', dataIndex: 'hostname', key: 'hostname' },
@@ -99,6 +190,46 @@ export default function DevicesPage({ type }: { type?: string }) {
         const typeName = record.type || Object.keys(deviceTypeInfo)[record.typeCode];
         return <Tag color={deviceTypeInfo[typeName]?.color || '#999'}>{deviceTypeInfo[typeName]?.name || typeName || 'Неизвестно'}</Tag>;
       },
+    },
+    {
+      title: 'ОС / Производитель', // НОВАЯ КОЛОНКА
+      key: 'osOrManufacturer',
+      render: (_, record) => {
+        // Для ПК (typeCode 0) и VM (typeCode 3) показываем ОС
+        if ((record.typeCode === 0 || record.typeCode === 3) && record.operatingSystem) {
+          const osMap = {
+            linux: <Tag icon={<CodeOutlined />} color="blue">Linux</Tag>,
+            windows: <Tag icon={<CodeOutlined />} color="cyan">Windows</Tag>
+          };
+          return osMap[record.operatingSystem as 'linux' | 'windows'] || record.operatingSystem;
+        }
+        // Для МФУ (typeCode 1) показываем производителя
+        if (record.typeCode === 1 && record.manufacturer) {
+          const manufacturerColors: Record<string, string> = {
+            'HP': 'green',
+            'Canon': 'geekblue',
+            'Xerox': 'orange',
+            'Kyocera': 'purple',
+            'Brother': 'cyan',
+            'Epson': 'magenta',
+            'Samsung': 'blue',
+            'Ricoh': 'gold',
+            'Sharp': 'lime',
+            'Konica Minolta': 'red'
+          };
+          return <Tag color={manufacturerColors[record.manufacturer] || 'green'}>{record.manufacturer}</Tag>;
+        }
+        // Для Cisco (typeCode 2) показываем "Cisco"
+        if (record.typeCode === 2) {
+          return <Tag color="orange">Cisco</Tag>;
+        }
+        return <Text type="secondary">—</Text>;
+      },
+    },
+    {
+      title: 'Модель', // НОВАЯ КОЛОНКА для модели
+      key: 'model',
+      render: (_, record) => record.model ? <Text>{record.model}</Text> : <Text type="secondary">—</Text>,
     },
     {
       title: 'Статус',
@@ -114,14 +245,34 @@ export default function DevicesPage({ type }: { type?: string }) {
       render: (_, record) => (record.createdAt ? new Date(record.createdAt).toLocaleString('ru-RU') : '—'),
     },
     {
+      title: 'Выполнение',
+      key: 'progress',
+      render: (_, record) => {
+        const progress = getActionProgress(record);
+        return progress > 0 ? (
+          <Progress type="circle" size={44} percent={progress} status={progress >= 100 ? 'success' : 'normal'} />
+        ) : (
+          <Text type="secondary">—</Text>
+        );
+      },
+    },
+    {
       title: 'Действия',
       key: 'actions',
       render: (_, record) => (
         <Space size="small" wrap>
-          <Button icon={<EditOutlined/>} onClick={() => { setSelectedDevice(record); openConfigModalByType()}}></Button>
-          <Button icon={<CodeOutlined />} onClick={() => { setSelectedDevice(record); setShowSSH(true); }}>Конфигурация</Button>
-          <Button icon={<ScanOutlined />} onClick={() => message.info(`Инвентаризация запущена для ${record.hostname}`)}>Инвентаризация</Button>
-          <Button danger icon={<DeleteOutlined />} onClick={() => handleDelete(record.id)}>Удалить</Button>
+          <Tooltip title="Редактировать">
+            <Button icon={<EditOutlined/>} onClick={() => { setSelectedDevice(record); openConfigModalByType(record); }} />
+          </Tooltip>
+          <Tooltip title="Конфигурация">
+            <Button icon={<CodeOutlined />} onClick={() => { setSelectedDevice(record); setShowSSH(true); }} />
+          </Tooltip>
+          <Tooltip title="Инвентаризация">
+            <Button icon={<ScanOutlined />} onClick={() => message.info(`Инвентаризация запущена для ${record.hostname}`)} />
+          </Tooltip>
+          <Tooltip title="Удалить">
+            <Button danger icon={<DeleteOutlined />} onClick={() => handleDelete(record.id)} />
+          </Tooltip>
         </Space>
       ),
     },
@@ -133,238 +284,317 @@ export default function DevicesPage({ type }: { type?: string }) {
       message.success('Устройство успешно добавлено');
       setDevices(prev => [...prev, res.data]);
     } catch (err) {
-      console.error(err);
       message.error('Не удалось добавить устройство');
     }
   };
 
-  const diffRows = useMemo(() => ([
-    { key: 1, line: '+ interface Gi0/1\n+ description Uplink to Core', type: 'add' },
-    { key: 2, line: '- shutdown', type: 'remove' },
-  ]), []);
+  const selectedConfigVersion = useMemo(() => {
+    if (!selectedConfigVersionId) return null;
+    return configVersions.find((v) => v.id === selectedConfigVersionId) || null;
+  }, [configVersions, selectedConfigVersionId]);
 
-  const auditRows = devices.slice(0, 8).map((d, idx) => ({
-    key: d.id || idx,
-    datetime: new Date(Date.now() - idx * 3600_000).toLocaleString('ru-RU'),
-    user: idx % 2 === 0 ? 'admin' : 'operator',
-    action: ['Создание', 'Изменение', 'Откат', 'Вход'][idx % 4],
-    device: d.hostname,
-    result: idx % 3 === 0 ? 'Ошибка' : 'Успех',
-    deviceType: d.type || Object.keys(deviceTypeInfo)[d.typeCode] || 'ПК',
-  }));
+  const currentConfigOptions = useMemo(() => {
+    if (!selectedConfigVersion?.newConfig) return [];
+    return selectedConfigVersion.newConfig.split('\n').map((line) => ({ ...parseConfigLine(line), status: 'unchanged' as const }));
+  }, [selectedConfigVersion]);
 
-  const openConfigModalByType = () => {
-    const typeCode = selectedDevice?.typeCode;
+  const handleTransferLine = (line: any, sourceIndex: number) => {
+    setTransferredLines((prev) => ({ ...prev, [sourceIndex]: { ...line, status: 'added' } }));
+    message.success(`Опция перенесена: ${line.option}`);
+  };
+
+  const diffPanels = useMemo(() => {
+    if (!selectedConfigVersion) return { previous: [], current: [] };
+    const baseDiff = buildPanelDiff(
+      selectedConfigVersion.oldConfigJson || '',
+      selectedConfigVersion.newConfig || ''
+    );
+    let transferIndex = 0;
+    return {
+      previous: baseDiff.previous,
+      current: baseDiff.current.map((line) => {
+        if (line.status !== 'added') return line;
+        const transferred = Object.values(transferredLines)[transferIndex];
+        transferIndex += 1;
+        return transferred || line;
+      }),
+    };
+  }, [selectedConfigVersion, transferredLines]);
+
+  const renderDiffLine = (line: any, index: number, panel: 'previous' | 'current') => {
+    const background = line.status === 'added' ? '#d9f7be' : line.status === 'removed' ? '#ffd6d6' : 'transparent';
+    const color = line.status === 'added' ? '#135200' : line.status === 'removed' ? '#820014' : '#262626';
+    const canTransfer = panel === 'previous' && line.status === 'removed';
+    return (
+      <div key={`${panel}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 8px', background, color }}>
+        <span style={{ flex: 1, fontFamily: 'monospace' }}><Text strong>{line.option}</Text>: {line.value}</span>
+        {canTransfer && (
+          <Tooltip title="Перенести в текущую конфигурацию">
+            <Button icon={<ArrowRightOutlined />} onClick={() => handleTransferLine(line, index)} size="small" type="text" />
+          </Tooltip>
+        )}
+      </div>
+    );
+  };
+
+  const openConfigModalByType = (device?: Device) => {
+    const typeCode = device?.typeCode ?? selectedDevice?.typeCode;
     if (typeCode === 2) return setCiscoModalOpen(true);
     if (typeCode === 1) return setMfuModalOpen(true);
     if (typeCode === 0) return setWindowsModalOpen(true);
     if (typeCode === 3) return setLinuxModalOpen(true);
-    message.info('Выберите устройиство из списка');
+    message.info('Выберите устройство из списка');
   };
 
-  const handleScan = async (options: any) => {
-  setShowScan(false);
-  setLoading(true);
-
-  try {
+ const handleScan = async (options: any) => {
     setShowScan(false);
     setIsScanning(true);
     setScanProgress(0);
-    const { ipaddr, mask, port, community, snmpv } = options;
+    try {
+      const { ipaddr, mask, port, community, snmpv } = options;
+      const urlStart = new URL('/api/v1/devices/scan', window.location.origin);
+      urlStart.searchParams.append('ipaddr', ipaddr);
+      urlStart.searchParams.append('mask', String(mask));
+      urlStart.searchParams.append('port', String(port));
+      urlStart.searchParams.append('community', community);
+      urlStart.searchParams.append('snmpv', snmpv);
+      const startRes = await fetch(urlStart.toString());
+      if (!startRes.ok) throw new Error(await startRes.text());
+      const startData = await startRes.json();
+      if (startData.error) throw new Error(startData.error);
+      const taskId = startData.taskId;
+      message.success('Сканирование запущено');
 
-    const urlStart = new URL('/api/devices/scan', window.location.origin);
-    urlStart.searchParams.append('ipaddr', ipaddr);
-    urlStart.searchParams.append('mask', String(mask));
-    urlStart.searchParams.append('port', String(port));
-    urlStart.searchParams.append('community', community);
-    urlStart.searchParams.append('snmpv', snmpv);
+      let progress = 0;
+      let statusData: { 
+        status: string; 
+        devices?: Device[]; 
+        count?: number; 
+        error?: string 
+      } = { status: 'running' };
 
-    const startRes = await fetch(urlStart.toString(), { method: 'GET' });
-    if (!startRes.ok) throw new Error(`Ошибка запуска: ${await startRes.text()}`);
-    
-    const startData = await startRes.json();
-    if (startData.error) throw new Error(startData.error);
+      while (statusData.status === 'running') {
+        await new Promise(r => setTimeout(r, 1000));
+        const urlStatus = new URL('/api/v1/devices/scan/status', window.location.origin);
+        urlStatus.searchParams.append('taskId', taskId);
+        const statusRes = await fetch(urlStatus.toString());
+        if (!statusRes.ok) throw new Error(await statusRes.text());
+        statusData = await statusRes.json();
+        progress += 10;
+        setScanProgress(Math.min(progress, 90));
+      }
 
-    const taskId = startData.taskId;
-    message.success('Сканирование запущено!');
-
-    let statusData: any = { status: 'running' };
-    let progress = 0;
-    while (statusData.status === 'running') {
-      await new Promise(r => setTimeout(r, 1000));
-
-      const urlStatus = new URL('/api/devices/scan/status', window.location.origin);
-      urlStatus.searchParams.append('taskId', taskId);
-
-      const statusRes = await fetch(urlStatus.toString());
-      if (!statusRes.ok) throw new Error(`Ошибка статуса: ${await statusRes.text()}`);
-      
-      statusData = await statusRes.json();
-      progress += 10;
-      setScanProgress(Math.min(progress, 90)); 
-    }
-
-    if (statusData.status === 'completed') {
-      const newDevices: Device[] = statusData.devices || [];
-      setDevices(prev => {
-        const existingIps = new Set(prev.map(d => d.ips));
-        return [
+      if (statusData.status === 'completed' && statusData.devices) {
+        const newDevices: Device[] = statusData.devices;
+        setDevices(prev => [
           ...prev,
-          ...newDevices.filter(d => !existingIps.has(d.ips))
-        ];
-      });
-      message.success(`Найдено и добавлено ${statusData.count} новых устройств`);
+          ...newDevices.filter(d => !prev.some(p => p.ips?.[0] === d.ips?.[0]))
+        ]);
+        message.success(`Найдено и добавлено ${newDevices.length} устройств`);
+      } else if (statusData.status === 'completed') {
+        message.info('Сканирование завершено, но новых устройств не найдено');
+      } else if (statusData.status === 'error') {
+        throw new Error(statusData.error || 'Ошибка сканирования');
+      }
+    } catch (err: any) {
+      message.error(`Ошибка сканирования: ${err.message}`);
+    } finally {
+      setIsScanning(false);
     }
+  };
 
-  } catch (err: any) {
-    console.error(err);
-    message.error(`Ошибка сканирования: ${err.message || 'Неизвестная ошибка'}`);
-  } finally {
-    setLoading(false);
-  }
-};
-
+  const filteredDevices = useMemo(() => {
+    const search = deviceSearch.trim().toLowerCase();
+    if (!search) return devices;
+    return devices.filter((d) =>
+      [d.hostname, d.groupName, d.osVersion, d.type, d.manufacturer, d.model, ...(d.ips || [])]
+        .some(val => val?.toLowerCase().includes(search))
+    );
+  }, [devices, deviceSearch]);
 
   return (
     <>
-      <Tabs
-        defaultActiveKey='devuces'
-        items={[
-          {
-            key: 'devices',
-            label: 'Список устройств',
-            children: (
-              <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <h2>
-                  Устройства:
-                  {type ? ` ${deviceTypeInfo[routeTypeMap[type]]?.name || routeTypeMap[type] || type}` : ' Всего'} 
-                  <span style={{ marginLeft: 16, fontSize: '0.9em', color: '#666' }}>
-                    ({devices.length} шт.)
-                  </span>
-                </h2>
-
+      <Tabs defaultActiveKey="devices" items={[
+        {
+          key: 'devices',
+          label: 'Список устройств',
+          children: (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+                <h2>Устройства: {type ? deviceTypeInfo[routeTypeMap[type]]?.name : 'Всего'} ({filteredDevices.length} из {devices.length})</h2>
                 <Space>
-                  <Button
-                    icon={<ScanOutlined />}
-                    type="primary"
-                    onClick={() => setShowScan(true)}
-                  >
-                    Сканировать сеть
-                  </Button>
-
-                  <Button
-                    icon={<PlusCircleOutlined />}
-                    type="default"
-                    onClick={() => setShowAddDevice(true)}
-                  >
-                    Добавить устройство
-                  </Button>
+                  <Button icon={<ScanOutlined />} type="primary" onClick={() => setShowScan(true)}>Сканировать сеть</Button>
+                  <Button icon={<PlusCircleOutlined />} onClick={() => setShowAddDevice(true)}>Добавить устройство</Button>
                 </Space>
               </div>
-
-              {
-                isScanning && <ScanProgress progress={scanProgress} />
-              }
-
+              {isScanning && <ScanProgress progress={scanProgress} />}
+              <Card style={{ marginBottom: 16 }}>
+                <Search placeholder="Поиск по имени, IP, группе, ОС, производителю, модели или типу" value={deviceSearch} onChange={e => setDeviceSearch(e.target.value)} style={{ maxWidth: 620 }} />
+              </Card>
               {loading ? (
                 <div style={{ textAlign: 'center', padding: 40 }}>Загрузка...</div>
-              ) : devices.length === 0 ? (
-                <Empty description="Нет устройств для отображения" />
+              ) : filteredDevices.length === 0 ? (
+                <Empty description="Нет устройств" />
               ) : (
                 <Card>
+                  <Space wrap style={{ marginBottom: 16 }}>
+                    <Text strong>Выбрано устройств: {selectedDeviceIds.length}</Text>
+                    <Button disabled={selectedDeviceIds.length === 0} icon={<FileDoneOutlined />} type="primary" onClick={() => message.info('Массовое применение в разработке')}>Применить настройки</Button>
+                    <Button disabled={selectedDeviceIds.length === 0} onClick={() => setSelectedDeviceIds([])}>Сбросить выбор</Button>
+                  </Space>
                   <Table
                     rowKey="id"
+                    rowSelection={{ selectedRowKeys: selectedDeviceIds, onChange: setSelectedDeviceIds }}
                     columns={deviceColumns}
-                    dataSource={devices}
-                    pagination={{ pageSize: 10 }}
+                    dataSource={filteredDevices}
+                    pagination={{ defaultPageSize: 15, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} из ${total}` }}
                   />
                 </Card>
               )}
-              </>
-            )
-          },
-          {
-            key: 'config',
-            label: 'Просмотр и сравнение конфигурации',
-            children: (
-              <Card title="Работа с конфигурациями устройства">
-                <Tabs
-                  items={[
-                    { key: 'current', label: 'Текущая', children: <pre style={{ background: '#111', color: '#7CFC00', padding: 12 }}>{`hostname ${selectedDevice?.hostname || 'Device01'}\ninterface Gi0/1\n ip address 10.0.0.1 255.255.255.0\n no shutdown`}</pre> },
-                    { key: 'history', label: 'История', children: <Paragraph>Версии конфигурации за последние 30 дней.</Paragraph> },
-                    { key: 'compare', label: 'Сравнение', children: <div>{diffRows.map((r) => <pre key={r.key} style={{ background: r.type === 'add' ? '#f6ffed' : '#fff1f0', color: r.type === 'add' ? '#237804' : '#a8071a', padding: 8 }}>{r.line}</pre>)}</div> },
-                    { key: 'templates', label: 'Шаблоны', children: <Paragraph>Шаблоны baseline для типов устройств.</Paragraph> },
-                  ]}
-                />
-                <Space>
-                  <Button type="primary" icon={<EditOutlined />}>Редактировать конфиграцию</Button>
-                  <Button icon={<ReloadOutlined />}>Откатить</Button>
-                  <Button type="primary" icon={<FileDoneOutlined />}>Применить шаблон</Button>
-                  <Button icon={<DownloadOutlined />}>Выгрузить</Button>
+            </>
+          ),
+        },
+        {
+          key: 'config',
+          label: 'Просмотр и сравнение конфигурации',
+          children: (
+            <Card title="Работа с конфигурациями устройства">
+              <Tabs items={[
+                {
+                  key: 'current',
+                  label: 'Текущая',
+                  children: (
+                    <Card size="small" styles={{ body: { padding: 0 } }}>
+                      <div style={{ background: '#111', borderRadius: 8, overflow: 'hidden' }}>
+                        {currentConfigOptions.map((line, idx) => (
+                          <div key={idx} style={{ color: '#7CFC00', fontFamily: 'monospace', padding: '4px 12px' }}>
+                            <Text strong style={{ color: '#7CFC00' }}>{line.option}</Text>: {line.value}
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  ),
+                },
+                {
+                  key: 'history',
+                  label: 'История',
+                  children: (
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <Paragraph>Версии конфигурации устройства</Paragraph>
+                      <Table
+                        rowKey="id"
+                        columns={[
+                          { title: 'ID', dataIndex: 'id' },
+                          { title: 'Версия', dataIndex: 'versionNumber' },
+                          { title: 'Дата применения', dataIndex: 'appliedAt', render: (v) => v ? new Date(v).toLocaleString() : '—' },
+                          { title: 'Откат', dataIndex: 'rollbackAvailable', render: (v) => <Tag color={v ? 'success' : 'default'}>{v ? 'доступен' : 'нет'}</Tag> },
+                          {
+                            title: 'Действия',
+                            render: (_, rec) => (
+                              <Button type={rec.id === selectedConfigVersionId ? 'primary' : 'default'} onClick={() => { setSelectedConfigVersionId(rec.id); setTransferredLines({}); }}>Сравнить</Button>
+                            ),
+                          },
+                        ]}
+                        dataSource={configVersions}
+                        pagination={false}
+                      />
+                    </Space>
+                  ),
+                },
+                {
+                  key: 'compare',
+                  label: 'Сравнение',
+                  children: (
+                    <Space direction="vertical" style={{ width: '100%' }} size="large">
+                      <Space wrap>
+                        <Text strong>Версия из БД:</Text>
+                        <Select
+                          value={selectedConfigVersionId}
+                          style={{ minWidth: 360 }}
+                          onChange={(val) => { setSelectedConfigVersionId(val); setTransferredLines({}); }}
+                          options={configVersions.map(v => ({ value: v.id, label: `№ ${v.id} · версия ${v.versionNumber} · ${v.appliedAt ? new Date(v.appliedAt).toLocaleString() : 'без даты'}` }))}
+                        />
+                      </Space>
+                      <Row gutter={16}>
+                        <Col xs={24} lg={12}>
+                          <Card size="small" title="Предыдущая конфигурация" styles={{ body: { padding: 0 } }}>
+                            {diffPanels.previous.map((line, idx) => renderDiffLine(line, idx, 'previous'))}
+                          </Card>
+                        </Col>
+                        <Col xs={24} lg={12}>
+                          <Card size="small" title="Текущая конфигурация" styles={{ body: { padding: 0 } }}>
+                            {diffPanels.current.map((line, idx) => renderDiffLine(line, idx, 'current'))}
+                          </Card>
+                        </Col>
+                      </Row>
+                      <Space wrap>
+                        <Button type="primary" icon={<FileDoneOutlined />}>Применить</Button>
+                        <Button icon={<ReloadOutlined />}>Откатить</Button>
+                        <Button icon={<DownloadOutlined />}>Выгрузить</Button>
+                      </Space>
+                    </Space>
+                  ),
+                },
+                {
+                  key: 'templates',
+                  label: 'Шаблоны',
+                  children: (
+                    <Card title="Пример шаблона baseline">
+                      <Space direction="vertical">
+                        <Paragraph>Шаблон можно применить к выбранным устройствам</Paragraph>
+                        {[
+                          { option: 'hostname.prefix', value: 'office-' },
+                          { option: 'logging.buffered', value: '8192' },
+                        ].map((item) => (
+                          <div key={item.option} style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: 6 }}>
+                            <Text strong>{item.option}</Text>: {item.value}
+                          </div>
+                        ))}
+                        <Button icon={<FileDoneOutlined />} type="primary">Применить шаблон</Button>
+                      </Space>
+                    </Card>
+                  ),
+                },
+              ]} />
+            </Card>
+          ),
+        },
+        {
+          key: 'terminal',
+          label: 'Встроенный терминал',
+          children: (
+            <Card title="Административный терминал" extra={<Tag color={terminalConnected ? 'green' : 'orange'}>{terminalConnected ? 'Подключено' : 'Нет подключения'}</Tag>}>
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <AutoComplete style={{ width: '100%' }} options={commandSuggestions.map(c => ({ value: c }))} value={terminalCommand} onChange={setTerminalCommand} placeholder="Введите команду" />
+                <pre style={{ background: '#101820', color: '#e6f7ff', minHeight: 180, padding: 12 }}>$ {terminalCommand || 'show running-config'}{terminalConnected ? '\nВывод команды...' : '\nТерминал отключен'}</pre>
+                <Space wrap>
+                  <Button type="primary" icon={<CodeOutlined />} onClick={() => { setTerminalConnected(true); setShowSSH(true); }}>Открыть xterm.js</Button>
+                  <Button icon={<FileSearchOutlined />}>Захватить конфигурацию</Button>
+                  <Button danger disabled={!terminalConnected} onClick={() => { setTerminalConnected(false); setShowSSH(false); message.success('Отключено'); }}>Отключиться</Button>
                 </Space>
-              </Card>
-            ),
-          },
-          {
-            key: 'terminal',
-            label: 'Встроенный терминал',
-            children: (
-              <Card title="Административный терминал" extra={<Tag color={selectedDevice ? 'green' : 'orange'}>{selectedDevice ? 'Подключено' : 'Нет подключения'}</Tag>}>
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  <AutoComplete style={{ width: '100%' }} options={commandSuggestions.map((value) => ({ value }))} value={terminalCommand} onChange={setTerminalCommand} placeholder="Введите команду" />
-                  <pre style={{ background: '#101820', color: '#e6f7ff', minHeight: 180, padding: 12 }}>$ {terminalCommand || 'show running-config'}\nВывод команды...</pre>
-                  <Space>
-                    <Button type="primary" icon={<CodeOutlined />} onClick={() => setShowSSH(true)}>Открыть xterm.js</Button>
-                    <Button icon={<FileSearchOutlined />}>Захватить конфигурацию</Button>
-                  </Space>
-                  <Text type="secondary">Сессии терминала изолированы. Логи сессий сохраняются в журнале аудита.</Text>
-                </Space>
-              </Card>
-            ),
-          },
-          {
-            key: 'audit',
-            label: 'Журнал аудита',
-            children: (
-              <Card title="Отчет по действиям пользователей" extra={<Space><Button>CSV</Button><Button>PDF</Button></Space>}>
-                <Space wrap style={{ marginBottom: 12 }}>
-                  <DatePicker.RangePicker />
-                  <Select placeholder="Пользователь" style={{ width: 180 }} options={[{ value: 'admin' }, { value: 'operator' }]} />
-                  <Select placeholder="Тип устройства" style={{ width: 180 }} options={Object.entries(deviceTypeInfo).map(([k, v]) => ({ value: k, label: v.name }))} />
-                </Space>
-                <Table columns={[{ title: 'Дата/время', dataIndex: 'datetime' }, { title: 'Пользователь', dataIndex: 'user' }, { title: 'Действие', dataIndex: 'action' }, { title: 'Устройство', dataIndex: 'device' }, { title: 'Результат', dataIndex: 'result', render: (v: string) => <Tag color={v === 'Успех' ? 'success' : 'error'}>{v}</Tag> }]} dataSource={auditRows} />
-              </Card>
-            ),
-          },
-        ]}
-      />
+                <Text type="secondary">Логи сессий сохраняются в аудите</Text>
+              </Space>
+            </Card>
+          ),
+        },
+        {
+          key: 'audit',
+          label: 'Журнал аудита',
+          children: (
+            <Card title="Отчет по действиям пользователей" extra={<Space><Button>CSV</Button><Button>PDF</Button></Space>}>
+              <Empty description="API аудита в разработке" />
+            </Card>
+          ),
+        },
+      ]} />
 
-      {/* Модалки */}
-      <SSHClient
-        open={showSSH}
-        onClose={() => setShowSSH(false)}
-        device={{
-          hostname: selectedDevice?.hostname || '',
-          ip: selectedDevice?.ips[0] || '',
-        }}
-      />
-      <ScanDeviceModal
-        open={showScan}
-        onCancel={() => setShowScan(false)}
-        onScan={handleScan}
-      />
-      <AddDeviceModal
-        open={showAddDevice}
-        onCancel={() => setShowAddDevice(false)}
-        onAdd={handleAddDevice}
-      />
-      <ConfigLinuxModal open={linuxModalOpen} onClose={() => setLinuxModalOpen(false)} hostname={selectedDevice?.hostname} />
-      <ConfigWindowsModal open={windowsModalOpen} onClose={() => setWindowsModalOpen(false)} hostname={selectedDevice?.hostname} />
-      <ConfigMFUModal open={mfuModalOpen} onClose={() => setMfuModalOpen(false)} hostname={selectedDevice?.hostname} />
-      <ConfigCiscoModal open={ciscoModalOpen} onClose={() => setCiscoModalOpen(false)} hostname={selectedDevice?.hostname} />
+      <DeviceTerminal open={showSSH} onClose={() => setShowSSH(false)} device={{ id: selectedDevice?.id || 0, hostname: selectedDevice?.hostname || '', ip: selectedDevice?.ips?.[0] || '', os: 'WINDOWS' }} />
+      <ScanDeviceModal open={showScan} onCancel={() => setShowScan(false)} onScan={handleScan} />
+      <AddDeviceModal open={showAddDevice} onCancel={() => setShowAddDevice(false)} onAdd={handleAddDevice} />
+      <ConfigLinuxModal open={linuxModalOpen} onClose={() => setLinuxModalOpen(false)} hostname={selectedDevice?.hostname} deviceId={selectedDevice?.id} />
+      <ConfigWindowsModal open={windowsModalOpen} onClose={() => setWindowsModalOpen(false)} hostname={selectedDevice?.hostname} deviceId={selectedDevice?.id} />
+      <ConfigMFUModal open={mfuModalOpen} onClose={() => setMfuModalOpen(false)} hostname={selectedDevice?.hostname} deviceId={selectedDevice?.id} />
+      <ConfigCiscoModal open={ciscoModalOpen} onClose={() => setCiscoModalOpen(false)} hostname={selectedDevice?.hostname} deviceId={selectedDevice?.id} />
     </>
   );
 }
-
-

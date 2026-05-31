@@ -18,7 +18,8 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
-import com.project.configmanager.service.AdAuthenticationProvider;
+
+import com.project.configmanager.auth.service.AdAuthenticationProvider;
 
 @Configuration
 @EnableWebSecurity
@@ -46,7 +47,7 @@ public class SecurityConfig {
             .cors(Customizer.withDefaults()) 
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/**", "/login", "/logout").permitAll()
+                .requestMatchers("/api/**", "/login", "/logout", "/ws/**").permitAll()
                 .anyRequest().authenticated()
             )
             .sessionManagement(session -> session
