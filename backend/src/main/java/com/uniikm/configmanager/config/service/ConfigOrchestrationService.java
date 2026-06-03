@@ -3,7 +3,10 @@ package com.uniikm.configmanager.config.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.uniikm.configmanager.common.dto.ConnectionProtocol;
 import com.uniikm.configmanager.common.dto.DeviceCommandTarget;
+import com.uniikm.configmanager.config.command.CiscoConfigCommandGenerator;
 import com.uniikm.configmanager.config.command.LinuxConfigCommandGenerator;
+import com.uniikm.configmanager.config.command.MFUConfigCommandGenerator;
+import com.uniikm.configmanager.config.command.ProxmoxConfigCommandGenerator;
 import com.uniikm.configmanager.config.command.WindowsConfigCommandGenerator;
 import com.uniikm.configmanager.config.dto.ApplyConfigResponse;
 import com.uniikm.configmanager.config.dto.DeviceCredentials;
@@ -38,6 +41,9 @@ public class ConfigOrchestrationService {
     private final DeviceConfigService deviceConfigService;
     private final WindowsConfigCommandGenerator windowsCommandGenerator;
     private final LinuxConfigCommandGenerator linuxCommandGenerator;
+    private final CiscoConfigCommandGenerator ciscoCommandGenerator;
+    private final ProxmoxConfigCommandGenerator proxmoxCommandGenerator;
+    private final MFUConfigCommandGenerator mfuCommandGenerator;
     private final RemoteCommandService remoteCommandService;
     private final RedisTemplate<String, Object> redisTemplate;
     private final ApplicationEventPublisher eventPublisher;
@@ -76,22 +82,19 @@ public class ConfigOrchestrationService {
         // 3. Сохраняем новую версию
         ConfigVersion newVersion = configVersionService.createNewVersion(newConfig, activeVersionOpt.orElse(null));
 
-        // 4. Генерируем команду
-        String command;
-        if (device.getType() == DeviceType.WINDOWS) {
-            command = windowsCommandGenerator.generateCommand(newConfig); // внедрите бин WindowsConfigCommandGenerator
-        } else {
-            command = linuxCommandGenerator.generateCommand(newConfig);
-        }
+        // 4. Генерируем команду в зависимости от типа устройства
+        String command = switch (device.getType()) {
+            case WINDOWS -> windowsCommandGenerator.generateCommand(newConfig);
+            case CISCO   -> ciscoCommandGenerator.generateCommand(newConfig);
+            case PROXMOX -> proxmoxCommandGenerator.generateCommand(newConfig);
+            case МФУ     -> mfuCommandGenerator.generateCommand(newConfig);
+            default      -> linuxCommandGenerator.generateCommand(newConfig); // LINUX
+        };
 
         DeviceCommandTarget target = buildDeviceCommandTarget(device, creds);
-        CommandExecutionRequest execRequest = new CommandExecutionRequest(command, List.of(target), null);
 
-        // 5. Асинхронный запуск
-        var groupStatus = remoteCommandService.executeAsync(execRequest);
-        String groupTaskId = groupStatus.taskGroupId();
-
-        // 6. Redis: оперативный статус
+        // 5. Redis: записываем ДО запуска задачи, чтобы избежать race condition
+        String groupTaskId = UUID.randomUUID().toString();
         String redisKey = "config:apply:" + groupTaskId;
         redisTemplate.opsForHash().putAll(redisKey, Map.of(
             "deviceId", deviceId,
@@ -101,6 +104,11 @@ public class ConfigOrchestrationService {
         ));
         redisTemplate.expire(redisKey, Duration.ofHours(1));
         redisTemplate.opsForValue().set("device:current-task:" + deviceId, groupTaskId, Duration.ofHours(1));
+
+        CommandExecutionRequest execRequest = new CommandExecutionRequest(command, List.of(target), null, groupTaskId);  // 4-arg: command, targets, timeout, groupTaskId
+
+        // 6. Асинхронный запуск
+        remoteCommandService.executeAsync(execRequest);
 
         // 7. Аудит: начало применения
         eventPublisher.publishEvent(new ConfigApplyEvent(
@@ -116,14 +124,20 @@ public class ConfigOrchestrationService {
 
     private DeviceCommandTarget buildDeviceCommandTarget(DeviceInfo device, DeviceCredentials creds) {
         String ip = device.getIps().isEmpty() ? device.getHostname() : device.getIps().get(0).getIp();
-        ConnectionProtocol protocol = device.getType() == DeviceType.WINDOWS ? ConnectionProtocol.WINRM : ConnectionProtocol.SSH;
+        ConnectionProtocol protocol = switch (device.getType()) {
+            case WINDOWS -> ConnectionProtocol.WINRM;
+            case МФУ     -> ConnectionProtocol.SNMP;
+            default      -> ConnectionProtocol.SSH;
+        };
+        String community = (creds.getCommunity() != null && !creds.getCommunity().isBlank())
+                ? creds.getCommunity() : "private";
         return new DeviceCommandTarget(
             ip,
-            creds.getPort(),     // Integer, может быть null
+            creds.getPort(),
             creds.getUsername(),
             creds.getPassword(),
             protocol,
-            null, null, null
+            community, null, null
         );
     }
 }

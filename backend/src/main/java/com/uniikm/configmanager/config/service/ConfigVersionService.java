@@ -30,16 +30,18 @@ public class ConfigVersionService {
     @Transactional
     public ConfigVersion createNewVersion(JsonNode newConfig, ConfigVersion parentVersion) {
         String checksum = computeChecksum(newConfig);
-        int versionNum = parentVersion != null ? parentVersion.getVersionNum() + 1 : 1;
-        ConfigVersion newVersion = ConfigVersion.builder()
-                .versionNum(versionNum)
-                .configData(newConfig)
-                .checksum(checksum)
-                .parentVersion(parentVersion)
-                .build();
-        return configVersionRepository.save(newVersion);
+        return configVersionRepository.findByChecksum(checksum).orElseGet(() -> {
+            int versionNum = parentVersion != null ? parentVersion.getVersionNum() + 1 : 1;
+            ConfigVersion newVersion = ConfigVersion.builder()
+                    .versionNum(versionNum)
+                    .configData(newConfig)
+                    .checksum(checksum)
+                    .parentVersion(parentVersion)
+                    .build();
+            return configVersionRepository.save(newVersion);
+        });
     }
-
+    
     @Transactional
     public void markAsApplied(Long configVersionId) {
         ConfigVersion version = configVersionRepository.findById(configVersionId)

@@ -71,7 +71,7 @@ public class RemoteCommandService {
     public CommandGroupStatus executeAsync(CommandExecutionRequest request) {
         validateRequest(request);
 
-        String groupTaskId = UUID.randomUUID().toString();
+        String groupTaskId = request.groupTaskId() != null ? request.groupTaskId() : UUID.randomUUID().toString();
         List<CommandTaskResult> queuedTasks = new ArrayList<>();
 
         for (DeviceCommandTarget target : request.targets()) {

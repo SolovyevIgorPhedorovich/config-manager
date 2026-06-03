@@ -1,5 +1,6 @@
 package com.uniikm.configmanager.config.dto;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import java.time.LocalDateTime;
 
 public record ConfigHistoryEntry(
@@ -7,5 +8,6 @@ public record ConfigHistoryEntry(
     Integer versionNum,
     LocalDateTime createdAt,
     String checksum,
-    Long parentVersionId
+    Long parentVersionId,
+    JsonNode configData        // полный конфиг этой версии
 ){}

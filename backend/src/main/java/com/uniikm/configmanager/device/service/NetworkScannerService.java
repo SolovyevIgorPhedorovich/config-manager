@@ -2,21 +2,22 @@ package com.uniikm.configmanager.device.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.uniikm.configmanager.audit.enums.AuditAction;
-import com.uniikm.configmanager.audit.model.EventLogEntity;
-import com.uniikm.configmanager.audit.repository.AuditLogRepository;
+import com.uniikm.configmanager.device.dto.DeviceResponse;
+import com.uniikm.configmanager.device.dto.ScanResultEntry;
+import com.uniikm.configmanager.device.dto.mapper.DeviceMapper;
+import com.uniikm.configmanager.device.enums.DeviceType;
 import com.uniikm.configmanager.device.model.DeviceGroup;
 import com.uniikm.configmanager.device.model.DeviceIP;
 import com.uniikm.configmanager.device.model.DeviceInfo;
 import com.uniikm.configmanager.device.model.DeviceOS;
+import com.uniikm.configmanager.device.repository.DeviceGroupRepository;
+import com.uniikm.configmanager.device.repository.DeviceOSRepository;
 import com.uniikm.configmanager.device.repository.DeviceRepository;
+import com.uniikm.configmanager.integration.dto.DeviceProbeResult;
+import com.uniikm.configmanager.integration.dto.ScanConfig;
+import com.uniikm.configmanager.integration.service.NetworkProbeService;
 
 import lombok.extern.slf4j.Slf4j;
-import org.snmp4j.*;
-import org.snmp4j.event.ResponseEvent;
-import org.snmp4j.mp.SnmpConstants;
-import org.snmp4j.smi.*;
-import org.snmp4j.transport.DefaultUdpTransportMapping;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.ResponseEntity;
@@ -25,22 +26,23 @@ import org.springframework.stereotype.Service;
 
 import java.net.InetAddress;
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 @Slf4j
 @Service
 public class NetworkScannerService {
 
     private final DeviceRepository deviceRepo;
-    private final AuditLogRepository auditLogRepository;
+    private final DeviceGroupRepository deviceGroupRepo;
+    private final DeviceOSRepository deviceOSRepo;
+    private final DeviceMapper deviceMapper;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
+    private final NetworkProbeService networkProbeService;
 
     @Value("${network-scan.redis-key-prefix:network-scan}")
     private String redisKeyPrefix;
@@ -54,34 +56,47 @@ public class NetworkScannerService {
     @Value("${network-scan.thread-pool-size:20}")
     private int threadPoolSize;
 
-    @Value("${network-scan.ping-timeout:2000}")
-    private int pingTimeoutMs;
-    
     @Value("${network-scan.ping-enabled:true}")
     private boolean pingEnabled;
 
     public NetworkScannerService(DeviceRepository deviceRepo,
-                                 AuditLogRepository auditLogRepository,
+                                 DeviceGroupRepository deviceGroupRepo,
+                                 DeviceOSRepository deviceOSRepo,
+                                 DeviceMapper deviceMapper,
                                  ObjectMapper objectMapper,
-                                 StringRedisTemplate redisTemplate) {
+                                 StringRedisTemplate redisTemplate,
+                                 NetworkProbeService networkProbeService) {
         this.deviceRepo = deviceRepo;
-        this.auditLogRepository = auditLogRepository;
+        this.deviceGroupRepo = deviceGroupRepo;
+        this.deviceOSRepo = deviceOSRepo;
+        this.deviceMapper = deviceMapper;
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
+        this.networkProbeService = networkProbeService;
     }
 
-    public ResponseEntity<Map<String, Object>> startScan(String ipaddr, int mask, int port,
-                                                         String community, String snmpv) {
+    public ResponseEntity<Map<String, Object>> startScan(
+            String ipaddr, int mask, int port,
+            String community, String snmpv, String scanMode,
+            String sshUsername, String sshPassword,
+            String winrmUsername, String winrmPassword) {
+
         if (mask > 24) {
             return ResponseEntity.badRequest().body(Map.of(
                     "error", "Максимальная маска для сканирования: /24 (" + maxHosts + " хостов)"
             ));
         }
 
+        ScanConfig config = new ScanConfig(
+                port, community, snmpv,
+                sshUsername, sshPassword,
+                winrmUsername, winrmPassword,
+                pingEnabled
+        );
         String taskId = UUID.randomUUID().toString();
 
-        CompletableFuture<List<DeviceInfo>> future = scanAsync(ipaddr, mask, port, community, snmpv);
-        future.thenAccept(devices -> saveScanResult(taskId, devices))
+        CompletableFuture<List<ScanResultEntry>> future = scanAsync(ipaddr, mask, scanMode, config);
+        future.thenAccept(results -> saveScanResult(taskId, results))
               .exceptionally(ex -> {
                   log.error("Scan failed for taskId {}: {}", taskId, ex.getMessage());
                   saveScanResult(taskId, List.of());
@@ -91,31 +106,37 @@ public class NetworkScannerService {
         return ResponseEntity.ok(Map.of(
                 "taskId", taskId,
                 "status", "started",
-                "message", "Сканирование запущено. Используйте /api/devices/scan/status?taskId=" + taskId
+                "message", "Сканирование запущено. Используйте /api/v1/devices/scan/status?taskId=" + taskId
         ));
     }
 
     public ResponseEntity<Object> getResult(String taskId) {
-        List<DeviceInfo> devices = getScanResult(taskId);
-        if (devices == null) {
+        List<ScanResultEntry> results = getScanResult(taskId);
+        if (results == null) {
             return ResponseEntity.ok(Map.of(
                     "status", "running",
                     "message", "Сканирование ещё не завершено"
             ));
         }
         redisTemplate.delete(taskKey(taskId));
+
+        long newCount      = results.stream().filter(r -> "NEW".equals(r.scanStatus())).count();
+        long existingCount = results.stream().filter(r -> "EXISTING".equals(r.scanStatus())).count();
+        long updatedCount  = results.stream().filter(r -> "UPDATED".equals(r.scanStatus())).count();
+
         return ResponseEntity.ok(Map.of(
-                "status", "completed",
-                "devices", devices,
-                "count", devices.size()
+                "status",        "completed",
+                "results",       results,
+                "count",         results.size(),
+                "newCount",      newCount,
+                "existingCount", existingCount,
+                "updatedCount",  updatedCount
         ));
     }
 
     @Async("taskExecutor")
-    public CompletableFuture<List<DeviceInfo>> scanAsync(String ipStart, int mask, int port,
-                                                         String community, String snmpVersion) {
-        List<DeviceInfo> foundDevices = Collections.synchronizedList(new ArrayList<>());
-
+    public CompletableFuture<List<ScanResultEntry>> scanAsync(
+            String ipStart, int mask, String scanMode, ScanConfig config) {
         try {
             validateMask(mask);
             int hostsCount = (int) Math.pow(2, 32 - mask);
@@ -127,190 +148,159 @@ public class NetworkScannerService {
             byte[] ipBytes = startIp.getAddress();
 
             ExecutorService executor = Executors.newFixedThreadPool(threadPoolSize);
-            List<CompletableFuture<Void>> futures = new ArrayList<>();
+            List<CompletableFuture<DeviceProbeResult>> probeFutures = new ArrayList<>();
 
             for (int i = 0; i < hostsCount; i++) {
-                String ipStr = incrementIp(ipBytes, i);
+                final String ipStr = incrementIp(ipBytes, i);
                 if (isNetworkOrBroadcast(ipStr, mask)) continue;
 
-                futures.add(CompletableFuture.runAsync(() -> {
-                    try {
-                        // Проверка доступности хоста через ping
-                        if (pingEnabled && !isHostReachable(ipStr, pingTimeoutMs)) {
-                            log.debug("Host {} is not reachable, skipping", ipStr);
-                            return;
-                        }
-                        
-                        DeviceInfo device = probeDevice(ipStr, port, community, snmpVersion);
-                        if (device != null && !deviceRepo.existsByIp(device.getIps().get(0).getIp())) {
-                            foundDevices.add(device);
-                            log.debug("Found device: {} ({})", device.getHostname(), ipStr);
-                        }
-                    } catch (Exception e) {
-                        log.debug("Scan error for {}: {}", ipStr, e.getMessage());
-                    }
-                }, executor));
+                probeFutures.add(CompletableFuture.supplyAsync(
+                        () -> networkProbeService.probe(ipStr, config), executor));
             }
 
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            int futureTimeoutMs = networkProbeService.getPingTimeoutMs() + 15000;
+            List<DeviceProbeResult> probeResults = probeFutures.stream()
+                    .map(f -> {
+                        try { return f.get(futureTimeoutMs, TimeUnit.MILLISECONDS); }
+                        catch (Exception e) { return null; }
+                    })
+                    .filter(Objects::nonNull)
+                    .toList();
+
             executor.shutdown();
-            
-            // Ждём завершения всех задач
-            if (!executor.awaitTermination(5, TimeUnit.MINUTES)) {
+            if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
                 executor.shutdownNow();
             }
 
-            if (!foundDevices.isEmpty()) {
-                deviceRepo.saveAll(foundDevices);
-                log.info("Scan finished. Found {} devices.", foundDevices.size());
-            } else {
-                log.info("Scan finished. No devices found.");
+            log.info("Phase 1 complete: {} hosts detected", probeResults.size());
+
+            List<ScanResultEntry> results = new ArrayList<>();
+            for (DeviceProbeResult probe : probeResults) {
+                try {
+                    int typeCode = detectDeviceType(probe.sysDescr());
+                    if (!matchesScanMode(typeCode, scanMode)) continue;
+
+                    Optional<DeviceInfo> existing = deviceRepo.findByIp(probe.ip());
+                    if (existing.isPresent()) {
+                        DeviceInfo device = existing.get();
+                        boolean changed = updateDeviceFromProbe(device, probe);
+                        if (changed) deviceRepo.save(device);
+                        DeviceResponse response = deviceMapper.toResponse(device);
+                        results.add(new ScanResultEntry(response, changed ? "UPDATED" : "EXISTING"));
+                    } else {
+                        DeviceInfo newDevice = createDeviceFromProbe(probe, typeCode);
+                        DeviceResponse response = deviceMapper.toResponse(deviceRepo.save(newDevice));
+                        results.add(new ScanResultEntry(response, "NEW"));
+                    }
+                } catch (Exception e) {
+                    log.warn("DB processing error for {}: {}", probe.ip(), e.getMessage());
+                }
             }
+
+            log.info("Scan done. Total: {}, New: {}, Existing: {}, Updated: {}",
+                    results.size(),
+                    results.stream().filter(r -> "NEW".equals(r.scanStatus())).count(),
+                    results.stream().filter(r -> "EXISTING".equals(r.scanStatus())).count(),
+                    results.stream().filter(r -> "UPDATED".equals(r.scanStatus())).count());
+
+            return CompletableFuture.completedFuture(results);
 
         } catch (Exception e) {
             log.error("Scan failed", e);
             throw new RuntimeException("Ошибка сканирования: " + e.getMessage(), e);
         }
-
-        return CompletableFuture.completedFuture(foundDevices);
     }
 
-    /**
-     * Проверка доступности хоста через стандартный Java ping
-     */
-    private boolean isHostReachable(String ip, int timeoutMs) {
-        try {
-            InetAddress inet = InetAddress.getByName(ip);
-            
-            // Используем Future для контроля таймаута
-            ExecutorService pingExecutor = Executors.newSingleThreadExecutor();
-            CompletableFuture<Boolean> future = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return inet.isReachable(timeoutMs);
-                } catch (Exception e) {
-                    log.trace("Ping error for {}: {}", ip, e.getMessage());
-                    return false;
-                }
-            }, pingExecutor);
-            
-            try {
-                return future.get(timeoutMs + 1000, TimeUnit.MILLISECONDS);
-            } catch (TimeoutException e) {
-                log.debug("Ping timeout for {}", ip);
-                future.cancel(true);
-                return false;
-            } finally {
-                pingExecutor.shutdownNow();
-            }
-            
-        } catch (Exception e) {
-            log.trace("Cannot ping {}: {}", ip, e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Пробует получить информацию об устройстве через SNMP
-     */
-    private DeviceInfo probeDevice(String ip, int port, String community, String version) {
-        TransportMapping<UdpAddress> transport = null;
-        Snmp snmp = null;
-        
-        try {
-            transport = new DefaultUdpTransportMapping();
-            snmp = new Snmp(transport);
-            transport.listen();
-
-            Address targetAddr = GenericAddress.parse("udp:" + ip + "/" + port);
-            CommunityTarget<Address> target = new CommunityTarget<>();
-            target.setCommunity(new OctetString(community));
-            target.setAddress(targetAddr);
-            target.setRetries(1);
-            target.setTimeout(1500);
-
-            switch (version.toLowerCase()) {
-                case "v1" -> target.setVersion(SnmpConstants.version1);
-                case "v2c" -> target.setVersion(SnmpConstants.version2c);
-                case "v3" -> target.setVersion(SnmpConstants.version3);
-                default -> throw new IllegalArgumentException("Unsupported SNMP version: " + version);
-            }
-
-            PDU pdu = new PDU();
-            pdu.add(new VariableBinding(SnmpConstants.sysName));
-            pdu.add(new VariableBinding(SnmpConstants.sysDescr));
-            pdu.setType(PDU.GET);
-
-            ResponseEvent<Address> response = snmp.send(pdu, target);
-            if (response != null && response.getResponse() != null) {
-                PDU respPDU = response.getResponse();
-                String hostname = getStringValue(respPDU, SnmpConstants.sysName);
-                String sysDescr = getStringValue(respPDU, SnmpConstants.sysDescr);
-
-                if (hostname == null || hostname.trim().isEmpty()) {
-                    return null;
-                }
-
-                DeviceInfo device = new DeviceInfo();
-                DeviceIP deviceIP = new DeviceIP();
-                deviceIP.setIp(ip);
-                deviceIP.setDevice(device);
-                device.setIps(List.of(deviceIP));
-
-                DeviceOS deviceOS = new DeviceOS();
-                deviceOS.setName(sysDescr != null ? sysDescr.trim() : "Unknown OS");
-                device.setOsVersion(deviceOS);
-
-                DeviceGroup group = new DeviceGroup();
-                group.setName("Auto-discovered");
-                device.setGroup(group);
-
-                device.setHostname(hostname.trim());
-                device.setTypeCode(detectDeviceType(sysDescr));
-                device.setIsActive(true);
-
-                return device;
-            }
-            
-        } catch (Exception e) {
-            log.debug("SNMP probe failed for {}: {}", ip, e.getMessage());
-        } finally {
-            if (snmp != null) {
-                try { 
-                    snmp.close(); 
-                } catch (Exception ignored) {}
-            }
-            if (transport != null) {
-                try { 
-                    transport.close(); 
-                } catch (Exception ignored) {}
-            }
-        }
-        
-        return null;
-    }
-
-    private String getStringValue(PDU pdu, OID oid) {
-        if (pdu == null) return null;
-        for (VariableBinding vb : pdu.getVariableBindings()) {
-            if (vb != null && oid.equals(vb.getOid())) {
-                Variable var = vb.getVariable();
-                return var == null ? null : var.toString();
-            }
-        }
-        return null;
-    }
+    // ── Domain: определение типа устройства по sysDescr ──────────────────────
 
     private int detectDeviceType(String sysDescr) {
-        if (sysDescr == null) return 6;
+        if (sysDescr == null) return DeviceType.WINDOWS.getCode();
         String lower = sysDescr.toLowerCase();
-        if (lower.contains("windows")) return 0;
-        if (lower.contains("linux")) return 1;
-        if (lower.contains("canon")) return 2;
-        if (lower.contains("kyocera")) return 3;
-        if (lower.contains("cisco") && lower.contains("switch")) return 4;
-        if (lower.contains("cisco") && lower.contains("router")) return 5;
-        return 6;
+        if (lower.contains("windows"))
+            return DeviceType.WINDOWS.getCode();
+        if (lower.contains("linux") || lower.contains("ubuntu") || lower.contains("debian")
+                || lower.contains("centos") || lower.contains("redhat") || lower.contains("fedora"))
+            return DeviceType.LINUX.getCode();
+        if (lower.contains("canon") || lower.contains("kyocera") || lower.contains("xerox")
+                || lower.contains("ricoh") || lower.contains("brother") || lower.contains("epson")
+                || (lower.contains("hp") && lower.contains("laserjet")))
+            return DeviceType.МФУ.getCode();
+        if (lower.contains("cisco") || lower.contains("ios software"))
+            return DeviceType.CISCO.getCode();
+        if (lower.contains("proxmox") || lower.contains("vmware") || lower.contains("esxi"))
+            return DeviceType.PROXMOX.getCode();
+        return DeviceType.WINDOWS.getCode();
     }
+
+    private boolean matchesScanMode(int typeCode, String scanMode) {
+        if (scanMode == null || "all".equalsIgnoreCase(scanMode)) return true;
+        return switch (scanMode.toLowerCase()) {
+            case "windows", "pc" -> typeCode == DeviceType.WINDOWS.getCode();
+            case "linux", "vm"   -> typeCode == DeviceType.LINUX.getCode() || typeCode == DeviceType.PROXMOX.getCode();
+            case "mfu"           -> typeCode == DeviceType.МФУ.getCode();
+            case "cisco"         -> typeCode == DeviceType.CISCO.getCode();
+            default              -> true;
+        };
+    }
+
+    // ── Domain: создание/обновление сущностей ─────────────────────────────────
+
+    private boolean updateDeviceFromProbe(DeviceInfo device, DeviceProbeResult probe) {
+        boolean changed = false;
+        if (!probe.hostname().equals(device.getHostname())) {
+            device.setHostname(probe.hostname());
+            changed = true;
+        }
+        String currentOsName = device.getOsVersion() != null ? device.getOsVersion().getName() : null;
+        String newOsName = truncate(probe.sysDescr(), 250);
+        if (!newOsName.equals(currentOsName)) {
+            device.setOsVersion(findOrCreateDeviceOS(probe));
+            changed = true;
+        }
+        return changed;
+    }
+
+    private DeviceInfo createDeviceFromProbe(DeviceProbeResult probe, int typeCode) {
+        DeviceGroup group = findOrCreateGroup("Auto-discovered");
+        DeviceOS os = findOrCreateDeviceOS(probe);
+
+        DeviceInfo device = new DeviceInfo();
+        device.setHostname(probe.hostname());
+        device.setTypeCode(typeCode);
+        device.setIsActive(true);
+        device.setGroup(group);
+        device.setOsVersion(os);
+
+        DeviceIP ip = new DeviceIP();
+        ip.setIp(probe.ip());
+        ip.setIsPrimary(true);
+        ip.setDevice(device);
+        device.setIps(new ArrayList<>(List.of(ip)));
+
+        return device;
+    }
+
+    private DeviceGroup findOrCreateGroup(String name) {
+        return deviceGroupRepo.findByName(name).orElseGet(() -> {
+            DeviceGroup g = new DeviceGroup();
+            g.setName(name);
+            g.setDescription("Устройства, обнаруженные при сканировании сети");
+            return deviceGroupRepo.save(g);
+        });
+    }
+
+    private DeviceOS findOrCreateDeviceOS(DeviceProbeResult probe) {
+        String osName = truncate(probe.sysDescr() != null ? probe.sysDescr().trim() : "Unknown", 250);
+        return deviceOSRepo.findByName(osName).orElseGet(() -> {
+            DeviceOS os = new DeviceOS();
+            os.setName(osName);
+            if (probe.vendor() != null) os.setVendor(truncate(probe.vendor(), 255));
+            if (probe.model() != null)  os.setModel(truncate(probe.model(), 200));
+            return deviceOSRepo.save(os);
+        });
+    }
+
+    // ── IP helpers ────────────────────────────────────────────────────────────
 
     private String incrementIp(byte[] baseIp, int offset) {
         byte[] ip = baseIp.clone();
@@ -327,59 +317,61 @@ public class NetworkScannerService {
         if (mask <= 0 || mask >= 32) return false;
         try {
             InetAddress addr = InetAddress.getByName(ipStr);
-            byte[] net = getNetworkAddressBytes(addr, mask);
-            byte[] brd = getBroadcastAddressBytes(addr, mask);
+            byte[] net = getNetworkAddressBytes(addr.getAddress().clone(), mask);
+            byte[] brd = getBroadcastAddressBytes(addr.getAddress().clone(), mask);
             return Arrays.equals(net, addr.getAddress()) || Arrays.equals(brd, addr.getAddress());
         } catch (Exception e) {
             return false;
         }
     }
 
-    private byte[] getNetworkAddressBytes(InetAddress addr, int mask) {
-        byte[] ip = addr.getAddress();
-        int full = mask / 8;
-        int bits = mask % 8;
+    private byte[] getNetworkAddressBytes(byte[] ip, int mask) {
+        int full = mask / 8, bits = mask % 8;
         for (int i = full; i < 4; i++) {
-            if (i == full && bits > 0) ip[i] &= (0xFF << (8 - bits));
-            else if (i > full) ip[i] = 0;
+            if (i == full && bits > 0) ip[i] &= (byte) (0xFF << (8 - bits));
+            else if (i > full)        ip[i] = 0;
         }
         return ip;
     }
 
-    private byte[] getBroadcastAddressBytes(InetAddress addr, int mask) {
-        byte[] ip = addr.getAddress();
+    private byte[] getBroadcastAddressBytes(byte[] ip, int mask) {
         if (mask == 32) return ip;
-        int full = mask / 8;
-        int bits = mask % 8;
+        int full = mask / 8, bits = mask % 8;
         for (int i = full; i < 4; i++) {
-            if (i == full && bits > 0) ip[i] |= (0xFF >> bits);
-            else if (i > full) ip[i] = (byte) 0xFF;
+            if (i == full && bits > 0) ip[i] |= (byte) (0xFF >> bits);
+            else if (i > full)         ip[i] = (byte) 0xFF;
         }
         return ip;
     }
 
     private void validateMask(int mask) {
-        if (mask < 0 || mask > 32) {
+        if (mask < 0 || mask > 32)
             throw new IllegalArgumentException("Mask must be between 0 and 32");
-        }
     }
 
-    private void saveScanResult(String taskId, List<DeviceInfo> devices) {
+    private String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max);
+    }
+
+    // ── Redis ─────────────────────────────────────────────────────────────────
+
+    private void saveScanResult(String taskId, List<ScanResultEntry> results) {
         try {
-            String json = objectMapper.writeValueAsString(devices);
+            String json = objectMapper.writeValueAsString(results);
             redisTemplate.opsForValue().set(taskKey(taskId), json, resultTtl);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialize scan result for task " + taskId, e);
         }
     }
 
-    private List<DeviceInfo> getScanResult(String taskId) {
+    private List<ScanResultEntry> getScanResult(String taskId) {
         String json = redisTemplate.opsForValue().get(taskKey(taskId));
         if (json == null) return null;
         try {
             return objectMapper.readValue(
-                json, 
-                objectMapper.getTypeFactory().constructCollectionType(List.class, DeviceInfo.class)
+                    json,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, ScanResultEntry.class)
             );
         } catch (JsonProcessingException e) {
             log.error("Failed to deserialize scan result for task {}", taskId, e);

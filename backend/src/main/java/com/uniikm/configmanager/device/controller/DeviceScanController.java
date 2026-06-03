@@ -24,9 +24,15 @@ public class DeviceScanController {
             @RequestParam(defaultValue = "24") int mask,
             @RequestParam(defaultValue = "161") int port,
             @RequestParam(defaultValue = "public") String community,
-            @RequestParam(defaultValue = "v2c") String snmpv) {
+            @RequestParam(defaultValue = "v2c") String snmpv,
+            @RequestParam(defaultValue = "all") String scanMode,
+            @RequestParam(required = false) String sshUsername,
+            @RequestParam(required = false) String sshPassword,
+            @RequestParam(required = false) String winrmUsername,
+            @RequestParam(required = false) String winrmPassword) {
 
-        return scannerService.startScan(ipaddr, mask, port, community, snmpv);
+        return scannerService.startScan(ipaddr, mask, port, community, snmpv, scanMode,
+                sshUsername, sshPassword, winrmUsername, winrmPassword);
     }
 
     @GetMapping("/scan/status")

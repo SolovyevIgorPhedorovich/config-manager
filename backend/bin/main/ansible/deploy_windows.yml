@@ -1,0 +1,16 @@
+---
+- name: Deploy Windows config via Ansible
+  hosts: windows_pcs
+  gather_facts: no
+  vars:
+    hostname: "{{ hostname | default('DESKTOP-NEW') }}"
+
+  tasks:
+    - name: Change computer name
+      win_hostname:
+        name: "{{ hostname }}"
+      register: change_name
+
+    - name: Debug hostname change
+      debug:
+        msg: "Hostname changed to {{ hostname }}"

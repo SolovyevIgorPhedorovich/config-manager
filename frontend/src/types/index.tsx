@@ -176,6 +176,22 @@ export interface DashboardStats {
 }
 
 // Типы для уведомлений
+export interface ScanSchedule {
+  id?: number;
+  name: string;
+  subnet: string;
+  mask: number;
+  port: number;
+  community: string;
+  snmpVersion: string;
+  scanMode: string;
+  cronExpression?: string;
+  enabled: boolean;
+  lastRunAt?: string;
+  lastRunStatus?: string;
+  createdAt?: string;
+}
+
 export interface Notification {
   id: string;
   type: 'info' | 'success' | 'warning' | 'error';

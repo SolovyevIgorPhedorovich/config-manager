@@ -16,6 +16,7 @@ import ConfigWindowsModal from '../components/ConfigWindowsModal';
 import ConfigMFUModal from '../components/ConfigMFUModal';
 import ConfigCiscoModal from '../components/ConfigCiscoModal';
 import DeviceTerminal from '../components/DeviceTerminal';
+import ConfigDiffViewer from '../components/ConfigDiffViewer';
 
 const { Text, Paragraph } = Typography;
 const { confirm } = AntModal;
@@ -80,7 +81,7 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<React.Key[]>([]);
   const [configVersions, setConfigVersions] = useState<ConfigVersion[]>([]);
   const [selectedConfigVersionId, setSelectedConfigVersionId] = useState<number>();
-  const [transferredLines, setTransferredLines] = useState<Record<number, any>>({});
+  const [compareVersionId, setCompareVersionId] = useState<number>();
   const [deleting, setDeleting] = useState(false);
   const [activeTabKey, setActiveTabKey] = useState<string>('devices');
 
@@ -102,7 +103,7 @@ export default function DevicesPage({ type }: { type?: string }) {
     } else {
       setConfigVersions([]);
       setSelectedConfigVersionId(undefined);
-      setTransferredLines({});
+      setCompareVersionId(undefined);
     }
   }, [selectedDevice]);
 
@@ -149,28 +150,32 @@ export default function DevicesPage({ type }: { type?: string }) {
     try {
       const res = await devicesApi.getHistory(deviceId);
       const data = res.data as any;
-      const versions: ConfigVersion[] = Array.isArray(data)
+      const rawHistory: any[] = Array.isArray(data)
         ? data
-        : Array.isArray(data?.history)
-          ? data.history.map((entry: any) => ({
-              id: entry.versionId,
-              deviceId,
-              configType: 0,
-              versionNumber: entry.versionNum ?? entry.versionNumber ?? 0,
-              appliedAt: entry.createdAt,
-              oldConfigJson: entry.oldConfigJson ?? '',
-              newConfig: entry.newConfig ?? '',
-              diffHash: entry.checksum,
-              rollbackAvailable: !!entry.parentVersionId,
-            }))
-          : [];
+        : Array.isArray(data?.history) ? data.history : [];
+
+      const versions: (ConfigVersion & { configData?: Record<string, any>; parentVersionId?: number })[] =
+        rawHistory.map((entry: any) => ({
+          id: entry.versionId ?? entry.id,
+          deviceId,
+          configType: 0,
+          versionNumber: entry.versionNum ?? entry.versionNumber ?? 0,
+          appliedAt: entry.createdAt,
+          oldConfigJson: entry.oldConfigJson ?? '',
+          newConfig: entry.newConfig ?? JSON.stringify(entry.configData ?? {}),
+          diffHash: entry.checksum,
+          rollbackAvailable: !!entry.parentVersionId,
+          configData: entry.configData ?? null,
+          parentVersionId: entry.parentVersionId ?? null,
+        }));
       setConfigVersions(versions);
       if (versions.length > 0) {
         setSelectedConfigVersionId(versions[0].id);
+        if (versions.length > 1) setCompareVersionId(versions[1].id);
       } else {
         setSelectedConfigVersionId(undefined);
+        setCompareVersionId(undefined);
       }
-      setTransferredLines({});
     } catch (err) {
       message.error('Ошибка загрузки истории конфигураций');
       setConfigVersions([]);
@@ -417,12 +422,15 @@ const handleBulkDelete = async () => {
             label: 'Текущая',
             children: (
               <Card size="small" styles={{ body: { padding: 0 } }}>
-                <div style={{ background: '#111', borderRadius: 8, overflow: 'hidden' }}>
-                  {currentConfigOptions.map((line, idx) => (
-                    <div key={idx} style={{ color: '#7CFC00', fontFamily: 'monospace', padding: '4px 12px' }}>
-                      <Text strong style={{ color: '#7CFC00' }}>{line.option}</Text>: {line.value}
-                    </div>
-                  ))}
+                <div style={{ background: '#111', borderRadius: 8, overflow: 'hidden', padding: '8px 12px' }}>
+                  {diffRightConfig
+                    ? Object.entries(diffRightConfig).map(([k, v]) => (
+                        <div key={k} style={{ color: '#7CFC00', fontFamily: 'monospace', padding: '2px 0' }}>
+                          <Text strong style={{ color: '#7CFC00' }}>{k}</Text>: {JSON.stringify(v)}
+                        </div>
+                      ))
+                    : <Text style={{ color: '#888' }}>Нет данных конфигурации</Text>
+                  }
                 </div>
               </Card>
             ),
@@ -445,7 +453,7 @@ const handleBulkDelete = async () => {
                       render: (_, rec) => (
                         <Button
                           type={rec.id === selectedConfigVersionId ? 'primary' : 'default'}
-                          onClick={() => { setSelectedConfigVersionId(rec.id); setTransferredLines({}); }}
+                          onClick={() => { setCompareVersionId(rec.id); setActiveTabKey('compare'); }}
                         >
                           Сравнить
                         </Button>
@@ -462,36 +470,56 @@ const handleBulkDelete = async () => {
             key: 'compare',
             label: 'Сравнение',
             children: (
-              <Space direction="vertical" style={{ width: '100%' }} size="large">
-                <Space wrap>
-                  <Text strong>Версия из БД:</Text>
-                  <Select
-                    value={selectedConfigVersionId}
-                    style={{ minWidth: 360 }}
-                    onChange={(val) => { setSelectedConfigVersionId(val); setTransferredLines({}); }}
-                    options={configVersions.map(v => ({
-                      value: v.id,
-                      label: `№ ${v.id} · версия ${v.versionNumber} · ${v.appliedAt ? new Date(v.appliedAt).toLocaleString() : 'без даты'}`
-                    }))}
+              <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                {/* Селекторы версий */}
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', background: '#fafafa', padding: '10px 12px', borderRadius: 6, border: '1px solid #e8e8e8' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Text strong style={{ color: '#a61d24' }}>◀ Сравниваемая:</Text>
+                    <Select
+                      placeholder="Выберите версию для сравнения"
+                      value={compareVersionId}
+                      style={{ minWidth: 300 }}
+                      allowClear
+                      onChange={setCompareVersionId}
+                      options={(configVersions as any[]).map((v: any) => ({
+                        value: v.id,
+                        label: `v${v.versionNumber} · ${v.appliedAt ? new Date(v.appliedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }) : 'без даты'} · ${v.diffHash?.slice(0,8) ?? ''}`
+                      }))}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Text strong style={{ color: '#237804' }}>▶ Базовая:</Text>
+                    <Select
+                      placeholder="Выберите базовую версию"
+                      value={selectedConfigVersionId}
+                      style={{ minWidth: 300 }}
+                      allowClear
+                      onChange={setSelectedConfigVersionId}
+                      options={(configVersions as any[]).map((v: any) => ({
+                        value: v.id,
+                        label: `v${v.versionNumber} · ${v.appliedAt ? new Date(v.appliedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }) : 'без даты'} · ${v.diffHash?.slice(0,8) ?? ''}`
+                      }))}
+                    />
+                  </div>
+                </div>
+
+                {/* Diff viewer */}
+                {(compareVersionId || selectedConfigVersionId) ? (
+                  <ConfigDiffViewer
+                    leftConfig={diffLeftConfig}
+                    rightConfig={diffRightConfig}
+                    leftLabel={compareVersionId
+                      ? `v${(configVersions as any[]).find((v: any) => v.id === compareVersionId)?.versionNumber ?? '?'} (сравниваемая)`
+                      : '—'}
+                    rightLabel={selectedConfigVersionId
+                      ? `v${(configVersions as any[]).find((v: any) => v.id === selectedConfigVersionId)?.versionNumber ?? '?'} (базовая)`
+                      : '—'}
                   />
-                </Space>
-                <Row gutter={16}>
-                  <Col xs={24} lg={12}>
-                    <Card size="small" title="Предыдущая конфигурация" styles={{ body: { padding: 0 } }}>
-                      {diffPanels.previous.map((line, idx) => renderDiffLine(line, idx, 'previous'))}
-                    </Card>
-                  </Col>
-                  <Col xs={24} lg={12}>
-                    <Card size="small" title="Текущая конфигурация" styles={{ body: { padding: 0 } }}>
-                      {diffPanels.current.map((line, idx) => renderDiffLine(line, idx, 'current'))}
-                    </Card>
-                  </Col>
-                </Row>
-                <Space wrap>
-                  <Button type="primary" icon={<FileDoneOutlined />}>Применить</Button>
-                  <Button icon={<ReloadOutlined />}>Откатить</Button>
-                  <Button icon={<DownloadOutlined />}>Выгрузить</Button>
-                </Space>
+                ) : (
+                  <div style={{ padding: 32, textAlign: 'center', color: '#8c8c8c', border: '1px dashed #d9d9d9', borderRadius: 6 }}>
+                    Выберите две версии конфигурации для сравнения
+                  </div>
+                )}
               </Space>
             ),
           },
@@ -536,49 +564,25 @@ const handleBulkDelete = async () => {
     return configVersions.find((v) => v.id === selectedConfigVersionId) || null;
   }, [configVersions, selectedConfigVersionId]);
 
-  const currentConfigOptions = useMemo(() => {
-    if (!selectedConfigVersion?.newConfig) return [];
-    return selectedConfigVersion.newConfig.split('\n').map((line) => ({ ...parseConfigLine(line), status: 'unchanged' as const }));
-  }, [selectedConfigVersion]);
-
-  const handleTransferLine = (line: any, sourceIndex: number) => {
-    setTransferredLines((prev) => ({ ...prev, [sourceIndex]: { ...line, status: 'added' } }));
-    message.success(`Опция перенесена: ${line.option}`);
+  // resolvedConfig — configData из истории (если есть) или парсим newConfig
+  const resolvedConfig = (v: any): Record<string, any> | null => {
+    if (!v) return null;
+    if (v.configData && typeof v.configData === 'object') return v.configData;
+    try { return JSON.parse(v.newConfig ?? '{}'); } catch { return null; }
   };
 
-  const diffPanels = useMemo(() => {
-    if (!selectedConfigVersion) return { previous: [], current: [] };
-    const baseDiff = buildPanelDiff(
-      selectedConfigVersion.oldConfigJson || '',
-      selectedConfigVersion.newConfig || ''
-    );
-    let transferIndex = 0;
-    return {
-      previous: baseDiff.previous,
-      current: baseDiff.current.map((line) => {
-        if (line.status !== 'added') return line;
-        const transferred = Object.values(transferredLines)[transferIndex];
-        transferIndex += 1;
-        return transferred || line;
-      }),
-    };
-  }, [selectedConfigVersion, transferredLines]);
+  // Левый (сравниваемый) и правый (базовый) конфиги для diff
+  const diffLeftConfig = useMemo(() => {
+    if (!compareVersionId) return null;
+    const v = (configVersions as any[]).find((x: any) => x.id === compareVersionId);
+    return resolvedConfig(v);
+  }, [configVersions, compareVersionId]);
 
-  const renderDiffLine = (line: any, index: number, panel: 'previous' | 'current') => {
-    const background = line.status === 'added' ? '#d9f7be' : line.status === 'removed' ? '#ffd6d6' : 'transparent';
-    const color = line.status === 'added' ? '#135200' : line.status === 'removed' ? '#820014' : '#262626';
-    const canTransfer = panel === 'previous' && line.status === 'removed';
-    return (
-      <div key={`${panel}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 8px', background, color }}>
-        <span style={{ flex: 1, fontFamily: 'monospace' }}><Text strong>{line.option}</Text>: {line.value}</span>
-        {canTransfer && (
-          <Tooltip title="Перенести в текущую конфигурацию">
-            <Button icon={<ArrowRightOutlined />} onClick={() => handleTransferLine(line, index)} size="small" type="text" />
-          </Tooltip>
-        )}
-      </div>
-    );
-  };
+  const diffRightConfig = useMemo(() => {
+    if (!selectedConfigVersionId) return null;
+    const v = (configVersions as any[]).find((x: any) => x.id === selectedConfigVersionId);
+    return resolvedConfig(v);
+  }, [configVersions, selectedConfigVersionId]);
 
   const openConfigModalByType = (device?: Device) => {
     const typeCode = device?.typeCode ?? selectedDevice?.typeCode;
@@ -589,45 +593,68 @@ const handleBulkDelete = async () => {
     message.info('Выберите устройство из списка');
   };
 
- const handleScan = async (options: any) => {
-  setShowScan(false);
-  setIsScanning(true);
-  setScanProgress(0);
+  const handleScan = async (options: any) => {
+    setShowScan(false);
+    setIsScanning(true);
+    setScanProgress(0);
 
-  try {
-    const startData = await devicesApi.startScan(options);
+    // Determine scan mode from current page type
+    const scanMode = type || 'all';
 
-    const taskId = startData.taskId;
-    message.success('Сканирование запущено');
+    try {
+      const startData = await devicesApi.startScan({ ...options, scanMode });
+      const taskId = startData.taskId;
+      message.info('Сканирование запущено...');
 
-    let statusData: any = { status: 'running' };
-    let progress = 0;
+      let statusData: any = { status: 'running' };
+      let progress = 0;
 
-    while (statusData.status === 'running') {
-      await new Promise(r => setTimeout(r, 1000));
+      while (statusData.status === 'running') {
+        await new Promise(r => setTimeout(r, 1500));
+        statusData = await devicesApi.getScanStatus(taskId);
+        progress = Math.min(progress + 12, 90);
+        setScanProgress(progress);
+      }
 
-      statusData = await devicesApi.getScanStatus(taskId);
+      setScanProgress(100);
 
-      progress += 10;
-      setScanProgress(Math.min(progress, 90));
+      if (statusData.status === 'completed' && Array.isArray(statusData.results)) {
+        const allResults: Array<{ device: Device; scanStatus: string }> = statusData.results;
+
+        const newDevices    = allResults.filter(r => r.scanStatus === 'NEW').map(r => r.device);
+        const updatedDevices = allResults.filter(r => r.scanStatus === 'UPDATED').map(r => r.device);
+        const existingCount = allResults.filter(r => r.scanStatus === 'EXISTING').length;
+
+        setDevices(prev => {
+          let list = [...prev];
+          // Add brand-new devices (not yet in state)
+          for (const d of newDevices) {
+            if (!list.some(p => p.id === d.id)) list.push(d);
+          }
+          // Refresh updated devices in state
+          for (const d of updatedDevices) {
+            const idx = list.findIndex(p => p.id === d.id);
+            if (idx >= 0) list[idx] = d;
+            else list.push(d);
+          }
+          return list;
+        });
+
+        message.success(
+          `Готово: ${allResults.length} устройств | ` +
+          `Новых: ${newDevices.length} | ` +
+          `Обновлено: ${updatedDevices.length} | ` +
+          `Без изменений: ${existingCount}`
+        );
+      } else if (statusData.status === 'completed') {
+        message.info('Сканирование завершено. Устройства не обнаружены.');
+      }
+    } catch (err: any) {
+      message.error(`Ошибка сканирования: ${err.message}`);
+    } finally {
+      setIsScanning(false);
     }
-
-    if (statusData.status === 'completed' && statusData.devices) {
-      const newDevices: Device[] = statusData.devices;
-
-      setDevices(prev => [
-        ...prev,
-        ...newDevices.filter(d => !prev.some(p => p.ips?.[0] === d.ips?.[0]))
-      ]);
-
-      message.success(`Найдено и добавлено ${newDevices.length} устройств`);
-    }
-  } catch (err: any) {
-    message.error(`Ошибка сканирования: ${err.message}`);
-  } finally {
-    setIsScanning(false);
-  }
-};
+  };
 
   const filteredDevices = useMemo(() => {
     const search = deviceSearch.trim().toLowerCase();
@@ -724,7 +751,7 @@ const handleBulkDelete = async () => {
       ]} />
 
       <DeviceTerminal open={showSSH} onClose={() => setShowSSH(false)} device={{ id: selectedDevice?.id || 0, hostname: selectedDevice?.hostname || '', ip: selectedDevice?.ips?.[0] || '', os: selectedDevice?.osVersion?.[0] || '' }} />
-      <ScanDeviceModal open={showScan} onCancel={() => setShowScan(false)} onScan={handleScan} />
+      <ScanDeviceModal open={showScan} onCancel={() => setShowScan(false)} onScan={handleScan} scanMode={type || 'all'} />
       <AddDeviceModal open={showAddDevice} onCancel={() => setShowAddDevice(false)} onAdd={handleAddDevice} />
       <ConfigLinuxModal open={linuxModalOpen} onClose={() => setLinuxModalOpen(false)} hostname={selectedDevice?.hostname} deviceId={selectedDevice?.id} />
       <ConfigWindowsModal open={windowsModalOpen} onClose={() => setWindowsModalOpen(false)} hostname={selectedDevice?.hostname} deviceId={selectedDevice?.id} />

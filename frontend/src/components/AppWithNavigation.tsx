@@ -8,6 +8,7 @@ import {
   AuditOutlined,
   LogoutOutlined,
   UserOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -15,6 +16,7 @@ import DevicesPage from '../pages/DevicesPage';
 import AdminPage from '../pages/AdminPage';
 import DashboardPage from '../pages/DashboardPage';
 import AuditPage from '../pages/AuditPage';
+import TemplatesPage from '../pages/TemplatesPage';
 
 const { Header, Content, Sider } = Layout;
 const { SubMenu } = Menu;
@@ -161,6 +163,10 @@ function AppWithNavigation() {
               </Menu.Item>
             </SubMenu>
 
+            <Menu.Item key="/templates" icon={<FileTextOutlined />}>
+              <Link to="/templates">Шаблоны</Link>
+            </Menu.Item>
+
             <SubMenu
               key="admin"
               icon={<ToolOutlined />}
@@ -191,6 +197,9 @@ function AppWithNavigation() {
             {location.pathname === '/admin/audit' && (
               <Breadcrumb.Item>Аудит</Breadcrumb.Item>
             )}
+            {location.pathname === '/templates' && (
+              <Breadcrumb.Item>Шаблоны</Breadcrumb.Item>
+            )}
           </Breadcrumb>
 
           <Content style={{
@@ -204,6 +213,7 @@ function AppWithNavigation() {
             )}
             {(location.pathname === '/admin' || location.pathname === '/admin/settings') && <AdminPage />}
             {location.pathname === '/admin/audit' && <AuditPage />}
+            {location.pathname === '/templates' && <TemplatesPage />}
           </Content>
         </Layout>
       </Layout>

@@ -15,7 +15,9 @@ import com.uniikm.configmanager.config.dto.ConfigCompareRequest;
 import com.uniikm.configmanager.config.dto.ConfigCompareResponse;
 import com.uniikm.configmanager.config.dto.ConfigHistoryResponse;
 import com.uniikm.configmanager.config.dto.ConfigStatusResponse;
+import com.uniikm.configmanager.config.dto.TemplateAssignmentResponse;
 import com.uniikm.configmanager.config.facade.ConfigFacade;
+import com.uniikm.configmanager.config.service.TemplateService;
 
 
 @RestController
@@ -24,6 +26,7 @@ import com.uniikm.configmanager.config.facade.ConfigFacade;
 public class ConfigController {
 
     private final ConfigFacade configFacade;
+    private final TemplateService templateService;
 
     @PostMapping("/devices/configure")
     public ResponseEntity<ApplyConfigResponse> configureDevices(@Validated @RequestBody ApplyConfigRequest request) {
@@ -45,5 +48,11 @@ public class ConfigController {
     @GetMapping("/config/tasks/{taskGroupId}/status")
     public ResponseEntity<List<ConfigStatusResponse>> getTaskStatus(@PathVariable String taskGroupId) {
          return ResponseEntity.ok(configFacade.getStatus(taskGroupId));
+    }
+
+    /** Шаблоны, привязанные к конкретному устройству. */
+    @GetMapping("/devices/{deviceId}/templates")
+    public ResponseEntity<List<TemplateAssignmentResponse>> getDeviceTemplates(@PathVariable Long deviceId) {
+        return ResponseEntity.ok(templateService.getDeviceAssignments(deviceId));
     }
 }

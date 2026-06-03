@@ -45,7 +45,7 @@ public class DeviceService {
         publishEvent(AuditAction.DEVICE_ADDED,
                 saved,
                 null,
-                saved);
+                toJson(saved));
 
         return saved;
     }

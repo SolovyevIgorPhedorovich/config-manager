@@ -55,7 +55,8 @@ public class ConfigFacadeImpl implements ConfigFacade {
                         v.getVersionNum(),
                         v.getCreatedAt(),
                         v.getChecksum(),
-                        v.getParentVersion() != null ? v.getParentVersion().getId() : null
+                        v.getParentVersion() != null ? v.getParentVersion().getId() : null,
+                        v.getConfigData()
                 ))
                 .collect(Collectors.toList());
         return new ConfigHistoryResponse(deviceId, entries);

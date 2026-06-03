@@ -77,6 +77,49 @@ public class SnmpClient {
         return result;
     }
 
+    public Map<String, String> set(String oid, String type, String value) {
+        Map<String, String> result = new HashMap<>();
+
+        if (snmp == null || target == null) {
+            throw new IllegalStateException("SNMP client is not connected");
+        }
+
+        try {
+            Variable variable = createVariable(type, value);
+            PDU pdu = new PDU();
+            pdu.add(new VariableBinding(new OID(oid), variable));
+            pdu.setType(PDU.SET);
+
+            ResponseEvent event = snmp.send(pdu, target);
+
+            if (event != null && event.getResponse() != null) {
+                PDU response = event.getResponse();
+                if (response.getErrorStatus() == PDU.noError) {
+                    result.put(oid, value);
+                } else {
+                    result.put("error", response.getErrorStatusText());
+                }
+            } else {
+                result.put("error", "No response from SNMP agent");
+            }
+
+        } catch (Exception e) {
+            result.put("error", e.getMessage());
+        }
+
+        return result;
+    }
+
+    private Variable createVariable(String type, String value) {
+        return switch (type) {
+            case "i" -> new Integer32(Integer.parseInt(value));
+            case "t" -> new TimeTicks(Long.parseLong(value));
+            case "o" -> new OID(value);
+            case "u" -> new UnsignedInteger32(Long.parseLong(value));
+            default  -> new OctetString(value);
+        };
+    }
+
     public void close() {
         try {
             if (snmp != null) {

@@ -34,6 +34,7 @@ public class IntegrationFacadeImpl implements IntegrationFacade {
                 new CommandExecutionRequest(
                         command,
                         List.of(target),
+                        null,
                         null
                 );
 

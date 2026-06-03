@@ -8,4 +8,5 @@ public class DeviceCredentials {
     private String username;
     private String password;
     private String privateKey;
+    private String community;
 }
