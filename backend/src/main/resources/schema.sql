@@ -176,7 +176,7 @@ CREATE INDEX IF NOT EXISTS idx_template_assignments_template ON template_assignm
 CREATE INDEX IF NOT EXISTS idx_template_assignments_device   ON template_assignments(device_id);
 
 -- ============================================================
--- МИГРАЦИИ для существующих баз данных
+-- МИГРАЦИИ для существующих баз данных (идемпотентные)
 -- ============================================================
 
 -- scan_schedules: добавляем credential-колонки если отсутствуют
@@ -191,38 +191,3 @@ ALTER TABLE event_log DROP CONSTRAINT IF EXISTS audit_log_action_type_check;
 -- event_log: aggregate_id и aggregate_type должны быть nullable (AuthEvent их не заполняет)
 ALTER TABLE event_log ALTER COLUMN aggregate_id   DROP NOT NULL;
 ALTER TABLE event_log ALTER COLUMN aggregate_type DROP NOT NULL;
-
--- event_log: user_id был VARCHAR(100), нужен BIGINT
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name   = 'event_log'
-          AND column_name  = 'user_id'
-          AND data_type    = 'character varying'
-    ) THEN
-        ALTER TABLE event_log
-            ALTER COLUMN user_id TYPE BIGINT
-            USING NULLIF(TRIM(user_id), '')::BIGINT;
-    END IF;
-END $$;
-
--- device_config: добавляем PRIMARY KEY если отсутствует
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints
-        WHERE table_schema = 'public'
-          AND table_name   = 'device_config'
-          AND constraint_type = 'PRIMARY KEY'
-    ) THEN
-        -- Удаляем дубли если есть (оставляем последний applied_at)
-        DELETE FROM device_config d1
-        USING device_config d2
-        WHERE d1.device_id = d2.device_id
-          AND d1.applied_at < d2.applied_at;
-
-        ALTER TABLE device_config ADD PRIMARY KEY (device_id);
-    END IF;
-END $$;
