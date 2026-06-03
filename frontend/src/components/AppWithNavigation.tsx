@@ -34,9 +34,6 @@ function AppWithNavigation() {
     vm: '#f53f3f',
   };
 
-  const handleMenuClick = ({ key }: { key: string }) => {
-    console.log('Меню:', key);
-  };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -129,7 +126,6 @@ function AppWithNavigation() {
             mode="inline"
             selectedKeys={[location.pathname]}
             defaultOpenKeys={['devices', 'admin']}
-            onClick={handleMenuClick}
             style={{ borderRight: 0, background: 'transparent', padding: '0 8px' }}
           >
 

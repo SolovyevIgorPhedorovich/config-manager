@@ -1,39 +1,47 @@
+// pages/LoginPage.tsx
 import { useState } from 'react';
 import { Form, Input, Button, Select, message } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { authApi } from '../api/authApi';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const [form] = Form.useForm(); 
+  const [form] = Form.useForm();
 
   const from = (location.state as any)?.from?.pathname || '/';
 
   const handleLogin = async (values: any) => {
     try {
       setLoading(true);
-      const res = await fetch('http://localhost:8080/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Auth-Type': values.authType },
-        body: JSON.stringify({
-          username: values.username,
-          password: values.password,
-          authType: values.authType
-        }),
-        credentials: 'include'
+      
+      // Очищаем старые данные перед логином
+      localStorage.clear();
+      
+      const response = await authApi.login({
+        username: values.username,
+        password: values.password,
+        authType: values.authType
       });
-
-      if (res.ok) {
-        const data = await res.json();
-        localStorage.setItem('token', data.token);
-        message.success('Вход выполнен!');
-        navigate(from, { replace: true });
-      } else {
-        throw new Error(res.statusText || 'Ошибка авторизации');
+      
+      // Сохраняем новые данные
+      if (response.token) {
+        localStorage.setItem('token', response.token);
       }
+      if (response.username) {
+        localStorage.setItem('username', response.username);
+      }
+      if (response.role) {
+        localStorage.setItem('role', response.role);
+      }
+      
+      message.success('Вход выполнен!');
+      navigate(from, { replace: true });
+      
     } catch (err: any) {
-      message.error(err.message || 'Ошибка входа');
+      console.error('Login error:', err);
+      message.error(err.response?.data?.message || 'Ошибка входа');
     } finally {
       setLoading(false);
     }
@@ -41,12 +49,13 @@ export default function LoginPage() {
 
   return (
     <div style={{ maxWidth: 400, margin: '20vh auto', textAlign: 'center' }}>
+      <h2>🔐 Вход в систему</h2>
       <Form form={form} layout="vertical" onFinish={handleLogin}>
         <Form.Item
           name="username"
           label="Логин"
           initialValue="admin"
-          rules={[{ required: true }]}
+          rules={[{ required: true, message: 'Введите логин' }]}
         >
           <Input placeholder="admin" />
         </Form.Item>
@@ -54,12 +63,10 @@ export default function LoginPage() {
         <Form.Item
           name="password"
           label="Пароль"
-          initialValue=""
-          rules={[{ required: true }]}
+          rules={[{ required: true, message: 'Введите пароль' }]}
         >
           <Input.Password placeholder="••••••" />
         </Form.Item>
-
 
         <Form.Item
           name="authType"

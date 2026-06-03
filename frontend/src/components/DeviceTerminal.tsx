@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Modal, Button, Form, InputNumber, Input, message, Typography } from 'antd';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
+import { devicesApi } from '../api/devicesApi';
 
 const { Text } = Typography;
 
@@ -188,25 +189,21 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
     try {
       setLoading(true);
 
-      const response = await fetch(
-        `http://localhost:8080/api/v1/devices/${device.id}/terminal/session`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(values),
-        }
-      );
+      const res = await devicesApi.terminalSession(device.id, {
+        host: values.host,
+        port: values.port,
+        user: values.user,
+        password: values.password,
+      });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || `HTTP ${response.status}`);
-      }
-
-      const session = await response.json();
+      const session = res.data;
       sessionIdRef.current = session.sessionId;
 
-      const socket = new WebSocket('ws://localhost:8080/ws/terminal');
-      socketRef.current = socket;
+      const token = localStorage.getItem('token');
+
+      const socket = new WebSocket(
+        `ws://localhost:8080/ws/terminal?token=${token}`
+      );
 
       socket.onopen = () => {
         message.success('Соединение установлено');

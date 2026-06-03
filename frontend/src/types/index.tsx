@@ -1,4 +1,4 @@
-export type DeviceTypeCode = 0 | 1 | 2 | 3;
+export type DeviceTypeCode = 0 | 1 | 2 | 3 | 4;
 export type CommunityVersion = 0 | 1 | 2;
 
 export interface Device {
@@ -11,11 +11,10 @@ export interface Device {
   osVersion?: string;
   isActive: boolean;
   createdAt?: string;
-  // Добавленные поля
-  operatingSystem?: 'linux' | 'windows'; // ОС для ПК и VM
-  manufacturer?: string; // Производитель для МФУ
-  model?: string; // Модель устройства
-  connectionProfile?: ConnectionProfile; // Профиль подключения
+  operatingSystem?: 'linux' | 'windows';
+  manufacturer?: string;
+  model?: string;
+  connectionProfile?: ConnectionProfile;
 }
 
 export interface ConnectionProfile {

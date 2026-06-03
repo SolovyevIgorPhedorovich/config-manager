@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Table, Space, Button, Tag, Empty, message, Tabs, AutoComplete, DatePicker, Select, Typography, Input, Row, Col, Progress, Tooltip } from 'antd';
+import { Card, Table, Space, Button, Tag, Empty, message, Tabs, AutoComplete, DatePicker, Select, Typography, Input, Row, Col, Progress, Tooltip, Modal as AntModal } from 'antd';
+import { ExclamationCircleOutlined, EyeOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { devicesApi } from '../api/devicesApi';
 import { configApi } from '../api/configApi';
@@ -17,6 +18,7 @@ import ConfigCiscoModal from '../components/ConfigCiscoModal';
 import DeviceTerminal from '../components/DeviceTerminal';
 
 const { Text, Paragraph } = Typography;
+const { confirm } = AntModal;
 const { Search } = Input;
 
 const deviceTypeInfo: Record<string, { name: string; color: string; code: number }> = {
@@ -79,6 +81,8 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [configVersions, setConfigVersions] = useState<ConfigVersion[]>([]);
   const [selectedConfigVersionId, setSelectedConfigVersionId] = useState<number>();
   const [transferredLines, setTransferredLines] = useState<Record<number, any>>({});
+  const [deleting, setDeleting] = useState(false);
+  const [activeTabKey, setActiveTabKey] = useState<string>('devices');
 
   // Модалки конфигурации
   const [linuxModalOpen, setLinuxModalOpen] = useState(false);
@@ -108,24 +112,19 @@ export default function DevicesPage({ type }: { type?: string }) {
       const res = await devicesApi.getAll();
       let list = res.data;
       
-      // Добавить тестовые данные для демонстрации (удалить в production)
       list = list.map(device => {
-        // Для ПК без ОС добавляем тестовую
         if (!device.operatingSystem && device.typeCode === 0) {
           return { ...device, operatingSystem: 'windows', model: device.model || 'OptiPlex 7090' };
         }
-        // Для VM без ОС
         if (!device.operatingSystem && device.typeCode === 3) {
           return { ...device, operatingSystem: 'linux', model: device.model || 'VMware VM' };
         }
-        // Для МФУ без производителя
         if (!device.manufacturer && device.typeCode === 1) {
           return { ...device, manufacturer: 'HP', model: device.model || 'LaserJet Pro M428fdw' };
         }
         return device;
       });
       
-      // Фильтр по типу, если передан через роутинг
       const mappedType = type ? routeTypeMap[type] : undefined;
       if (mappedType) {
         const expectedCode = deviceTypeInfo[mappedType].code;
@@ -138,6 +137,12 @@ export default function DevicesPage({ type }: { type?: string }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleViewConfig = async (device: Device) => {
+    setSelectedDevice(device);
+    await loadConfigVersions(device.id!);
+    setActiveTabKey('config');
   };
 
   const loadConfigVersions = async (deviceId: number) => {
@@ -157,16 +162,91 @@ export default function DevicesPage({ type }: { type?: string }) {
     }
   };
 
-  const handleDelete = async (id?: number) => {
-    if (!id) return;
-    try {
-      await devicesApi.delete(id, 'current-user');
-      message.success('Устройство удалено');
-      setDevices((prev) => prev.filter((d) => d.id !== id));
-    } catch (err) {
-      message.error('Ошибка удаления устройства');
-    }
-  };
+const handleDelete = async (id?: number, hostname?: string) => {
+  if (!id) return;
+  
+  confirm({
+    title: 'Удаление устройства',
+    icon: <ExclamationCircleOutlined />,
+    content: `Вы уверены, что хотите удалить устройство "${hostname}"? Это действие нельзя отменить.`,
+    okText: 'Да, удалить',
+    okType: 'danger',
+    cancelText: 'Отмена',
+    onOk: async () => {
+      try {
+        await devicesApi.delete(id);
+        message.success(`Устройство "${hostname}" успешно удалено`);
+        setDevices((prev) => prev.filter((d) => d.id !== id));
+        
+        if (selectedDevice?.id === id) {
+          setSelectedDevice(null);
+        }
+
+        setSelectedDeviceIds(prev => prev.filter(selectedId => selectedId !== id));
+      } catch (err: any) {
+        console.error('Ошибка удаления:', err);
+        message.error(err.response?.data?.message || 'Ошибка удаления устройства');
+      }
+    },
+  });
+};
+
+const handleBulkDelete = async () => {
+  if (selectedDeviceIds.length === 0) return;
+  
+  const devicesToDelete = devices.filter(d => selectedDeviceIds.includes(d.id!));
+  const deviceNames = devicesToDelete.map(d => d.hostname).join(', ');
+  
+  confirm({
+    title: 'Массовое удаление устройств',
+    icon: <ExclamationCircleOutlined />,
+    content: (
+      <div>
+        <p>Вы уверены, что хотите удалить следующие устройства?</p>
+        <p><strong>{selectedDeviceIds.length} устройств(а):</strong></p>
+        <p style={{ fontSize: '12px', color: '#666', maxHeight: '200px', overflow: 'auto' }}>
+          {deviceNames}
+        </p>
+        <p style={{ color: 'red', marginTop: '10px' }}>Это действие нельзя отменить!</p>
+      </div>
+    ),
+    okText: 'Да, удалить все',
+    okType: 'danger',
+    cancelText: 'Отмена',
+    onOk: async () => {
+      setDeleting(true);
+      try {
+
+        const response = await devicesApi.bulkDelete(selectedDeviceIds as number[]);
+        
+        if (response.data.failCount === 0) {
+          message.success(`Успешно удалено ${response.data.successCount} устройств`);
+        } else {
+          message.warning(
+            `Удалено ${response.data.successCount} устройств. Ошибок: ${response.data.failCount}`
+          );
+
+          response.data.errors.forEach((error: any) => {
+            console.error(`Ошибка удаления устройства ${error.id}: ${error.error}`);
+            message.error(`Не удалось удалить устройство ID: ${error.id} - ${error.error}`);
+          });
+        }
+
+        setDevices((prev) => prev.filter((d) => !selectedDeviceIds.includes(d.id!)));
+        setSelectedDeviceIds([]);
+
+        if (selectedDevice && selectedDeviceIds.includes(selectedDevice.id!)) {
+          setSelectedDevice(null);
+        }
+      } catch (err: any) {
+        console.error('Ошибка массового удаления:', err);
+        message.error(err.response?.data?.message || 'Ошибка при массовом удалении устройств');
+      } finally {
+        setDeleting(false);
+      }
+    },
+  });
+};
 
   const runtimeStatus = (device: Device): DeviceRuntimeStatus => {
     // Здесь можно вызывать API для проверки статуса, пока заглушка
@@ -192,11 +272,11 @@ export default function DevicesPage({ type }: { type?: string }) {
       },
     },
     {
-      title: 'ОС / Производитель', // НОВАЯ КОЛОНКА
+      title: 'ОС / Производитель',
       key: 'osOrManufacturer',
       render: (_, record) => {
         // Для ПК (typeCode 0) и VM (typeCode 3) показываем ОС
-        if ((record.typeCode === 0 || record.typeCode === 3) && record.operatingSystem) {
+        if ((record.typeCode === 0 || record.typeCode === 3 || record.osVersion === 'linux') && record.operatingSystem) {
           const osMap = {
             linux: <Tag icon={<CodeOutlined />} color="blue">Linux</Tag>,
             windows: <Tag icon={<CodeOutlined />} color="cyan">Windows</Tag>
@@ -227,7 +307,7 @@ export default function DevicesPage({ type }: { type?: string }) {
       },
     },
     {
-      title: 'Модель', // НОВАЯ КОЛОНКА для модели
+      title: 'Модель',
       key: 'model',
       render: (_, record) => record.model ? <Text>{record.model}</Text> : <Text type="secondary">—</Text>,
     },
@@ -264,19 +344,166 @@ export default function DevicesPage({ type }: { type?: string }) {
           <Tooltip title="Редактировать">
             <Button icon={<EditOutlined/>} onClick={() => { setSelectedDevice(record); openConfigModalByType(record); }} />
           </Tooltip>
-          <Tooltip title="Конфигурация">
+          <Tooltip title="Терминал">
             <Button icon={<CodeOutlined />} onClick={() => { setSelectedDevice(record); setShowSSH(true); }} />
+          </Tooltip>
+          <Tooltip title="Просмотр конфигурации">
+            <Button icon={<EyeOutlined />} onClick={() => handleViewConfig(record)} />
           </Tooltip>
           <Tooltip title="Инвентаризация">
             <Button icon={<ScanOutlined />} onClick={() => message.info(`Инвентаризация запущена для ${record.hostname}`)} />
           </Tooltip>
           <Tooltip title="Удалить">
-            <Button danger icon={<DeleteOutlined />} onClick={() => handleDelete(record.id)} />
+            <Button danger icon={<DeleteOutlined />} onClick={() => handleDelete(record.id, record.hostname)} />
           </Tooltip>
         </Space>
       ),
     },
   ];
+
+  const renderConfigTab = () => {
+    if (!selectedDevice) {
+      // Показываем список устройств того же типа (или всех, если type не задан)
+      const filteredByType = type
+        ? devices.filter(d => d.type === routeTypeMap[type] || d.typeCode === deviceTypeInfo[routeTypeMap[type]]?.code)
+        : devices;
+      return (
+        <Card title="Выберите устройство для просмотра конфигурации">
+        {filteredByType.length === 0 ? (
+          <Empty description="Нет устройств данного типа" />
+        ) : (
+          <Table
+            rowKey="id"
+            columns={[
+              { title: 'Имя устройства', dataIndex: 'hostname' },
+              { title: 'IP-адрес', render: (_, rec) => rec.ips?.[0] || '—' },
+              { title: 'Тип', render: (_, rec) => <Tag color={deviceTypeInfo[rec.type]?.color}>{deviceTypeInfo[rec.type]?.name}</Tag> },
+              { title: '', render: (_, rec) => <Button type="primary" onClick={() => handleViewConfig(rec)}>Выбрать</Button> },
+            ]}
+            dataSource={filteredByType}
+            pagination={{ pageSize: 10 }}
+          />
+        )}
+      </Card>
+    );
+  }
+
+    // Если устройство выбрано – показываем существующий интерфейс работы с конфигурацией
+      return (
+    <Card
+      title={`Конфигурация устройства: ${selectedDevice.hostname}`}
+      extra={<Button onClick={() => setSelectedDevice(null)}>Назад к списку</Button>}
+    >
+      <Tabs
+        items={[
+          {
+            key: 'current',
+            label: 'Текущая',
+            children: (
+              <Card size="small" styles={{ body: { padding: 0 } }}>
+                <div style={{ background: '#111', borderRadius: 8, overflow: 'hidden' }}>
+                  {currentConfigOptions.map((line, idx) => (
+                    <div key={idx} style={{ color: '#7CFC00', fontFamily: 'monospace', padding: '4px 12px' }}>
+                      <Text strong style={{ color: '#7CFC00' }}>{line.option}</Text>: {line.value}
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            ),
+          },
+          {
+            key: 'history',
+            label: 'История',
+            children: (
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Paragraph>Версии конфигурации устройства</Paragraph>
+                <Table
+                  rowKey="id"
+                  columns={[
+                    { title: 'ID', dataIndex: 'id' },
+                    { title: 'Версия', dataIndex: 'versionNumber' },
+                    { title: 'Дата применения', dataIndex: 'appliedAt', render: (v) => v ? new Date(v).toLocaleString() : '—' },
+                    { title: 'Откат', dataIndex: 'rollbackAvailable', render: (v) => <Tag color={v ? 'success' : 'default'}>{v ? 'доступен' : 'нет'}</Tag> },
+                    {
+                      title: 'Действия',
+                      render: (_, rec) => (
+                        <Button
+                          type={rec.id === selectedConfigVersionId ? 'primary' : 'default'}
+                          onClick={() => { setSelectedConfigVersionId(rec.id); setTransferredLines({}); }}
+                        >
+                          Сравнить
+                        </Button>
+                      ),
+                    },
+                  ]}
+                  dataSource={configVersions}
+                  pagination={false}
+                />
+              </Space>
+            ),
+          },
+          {
+            key: 'compare',
+            label: 'Сравнение',
+            children: (
+              <Space direction="vertical" style={{ width: '100%' }} size="large">
+                <Space wrap>
+                  <Text strong>Версия из БД:</Text>
+                  <Select
+                    value={selectedConfigVersionId}
+                    style={{ minWidth: 360 }}
+                    onChange={(val) => { setSelectedConfigVersionId(val); setTransferredLines({}); }}
+                    options={configVersions.map(v => ({
+                      value: v.id,
+                      label: `№ ${v.id} · версия ${v.versionNumber} · ${v.appliedAt ? new Date(v.appliedAt).toLocaleString() : 'без даты'}`
+                    }))}
+                  />
+                </Space>
+                <Row gutter={16}>
+                  <Col xs={24} lg={12}>
+                    <Card size="small" title="Предыдущая конфигурация" styles={{ body: { padding: 0 } }}>
+                      {diffPanels.previous.map((line, idx) => renderDiffLine(line, idx, 'previous'))}
+                    </Card>
+                  </Col>
+                  <Col xs={24} lg={12}>
+                    <Card size="small" title="Текущая конфигурация" styles={{ body: { padding: 0 } }}>
+                      {diffPanels.current.map((line, idx) => renderDiffLine(line, idx, 'current'))}
+                    </Card>
+                  </Col>
+                </Row>
+                <Space wrap>
+                  <Button type="primary" icon={<FileDoneOutlined />}>Применить</Button>
+                  <Button icon={<ReloadOutlined />}>Откатить</Button>
+                  <Button icon={<DownloadOutlined />}>Выгрузить</Button>
+                </Space>
+              </Space>
+            ),
+          },
+          {
+            key: 'templates',
+            label: 'Шаблоны',
+            children: (
+              <Card title="Пример шаблона baseline">
+                <Space direction="vertical">
+                  <Paragraph>Шаблон можно применить к выбранным устройствам</Paragraph>
+                  {[
+                    { option: 'hostname.prefix', value: 'office-' },
+                    { option: 'logging.buffered', value: '8192' },
+                  ].map((item) => (
+                    <div key={item.option} style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: 6 }}>
+                      <Text strong>{item.option}</Text>: {item.value}
+                    </div>
+                  ))}
+                  <Button icon={<FileDoneOutlined />} type="primary">Применить шаблон</Button>
+                </Space>
+              </Card>
+            ),
+          },
+        ]}
+      />
+    </Card>
+  );
+  };
 
   const handleAddDevice = async (device: Partial<Device>) => {
     try {
@@ -347,61 +574,44 @@ export default function DevicesPage({ type }: { type?: string }) {
   };
 
  const handleScan = async (options: any) => {
-    setShowScan(false);
-    setIsScanning(true);
-    setScanProgress(0);
-    try {
-      const { ipaddr, mask, port, community, snmpv } = options;
-      const urlStart = new URL('/api/v1/devices/scan', window.location.origin);
-      urlStart.searchParams.append('ipaddr', ipaddr);
-      urlStart.searchParams.append('mask', String(mask));
-      urlStart.searchParams.append('port', String(port));
-      urlStart.searchParams.append('community', community);
-      urlStart.searchParams.append('snmpv', snmpv);
-      const startRes = await fetch(urlStart.toString());
-      if (!startRes.ok) throw new Error(await startRes.text());
-      const startData = await startRes.json();
-      if (startData.error) throw new Error(startData.error);
-      const taskId = startData.taskId;
-      message.success('Сканирование запущено');
+  setShowScan(false);
+  setIsScanning(true);
+  setScanProgress(0);
 
-      let progress = 0;
-      let statusData: { 
-        status: string; 
-        devices?: Device[]; 
-        count?: number; 
-        error?: string 
-      } = { status: 'running' };
+  try {
+    const startData = await devicesApi.startScan(options);
 
-      while (statusData.status === 'running') {
-        await new Promise(r => setTimeout(r, 1000));
-        const urlStatus = new URL('/api/v1/devices/scan/status', window.location.origin);
-        urlStatus.searchParams.append('taskId', taskId);
-        const statusRes = await fetch(urlStatus.toString());
-        if (!statusRes.ok) throw new Error(await statusRes.text());
-        statusData = await statusRes.json();
-        progress += 10;
-        setScanProgress(Math.min(progress, 90));
-      }
+    const taskId = startData.taskId;
+    message.success('Сканирование запущено');
 
-      if (statusData.status === 'completed' && statusData.devices) {
-        const newDevices: Device[] = statusData.devices;
-        setDevices(prev => [
-          ...prev,
-          ...newDevices.filter(d => !prev.some(p => p.ips?.[0] === d.ips?.[0]))
-        ]);
-        message.success(`Найдено и добавлено ${newDevices.length} устройств`);
-      } else if (statusData.status === 'completed') {
-        message.info('Сканирование завершено, но новых устройств не найдено');
-      } else if (statusData.status === 'error') {
-        throw new Error(statusData.error || 'Ошибка сканирования');
-      }
-    } catch (err: any) {
-      message.error(`Ошибка сканирования: ${err.message}`);
-    } finally {
-      setIsScanning(false);
+    let statusData: any = { status: 'running' };
+    let progress = 0;
+
+    while (statusData.status === 'running') {
+      await new Promise(r => setTimeout(r, 1000));
+
+      statusData = await devicesApi.getScanStatus(taskId);
+
+      progress += 10;
+      setScanProgress(Math.min(progress, 90));
     }
-  };
+
+    if (statusData.status === 'completed' && statusData.devices) {
+      const newDevices: Device[] = statusData.devices;
+
+      setDevices(prev => [
+        ...prev,
+        ...newDevices.filter(d => !prev.some(p => p.ips?.[0] === d.ips?.[0]))
+      ]);
+
+      message.success(`Найдено и добавлено ${newDevices.length} устройств`);
+    }
+  } catch (err: any) {
+    message.error(`Ошибка сканирования: ${err.message}`);
+  } finally {
+    setIsScanning(false);
+  }
+};
 
   const filteredDevices = useMemo(() => {
     const search = deviceSearch.trim().toLowerCase();
@@ -414,7 +624,7 @@ export default function DevicesPage({ type }: { type?: string }) {
 
   return (
     <>
-      <Tabs defaultActiveKey="devices" items={[
+      <Tabs activeKey={activeTabKey} onChange={setActiveTabKey} items={[
         {
           key: 'devices',
           label: 'Список устройств',
@@ -439,6 +649,15 @@ export default function DevicesPage({ type }: { type?: string }) {
                 <Card>
                   <Space wrap style={{ marginBottom: 16 }}>
                     <Text strong>Выбрано устройств: {selectedDeviceIds.length}</Text>
+                    <Button 
+                      danger 
+                      icon={<DeleteOutlined />} 
+                      onClick={handleBulkDelete}
+                      disabled={selectedDeviceIds.length === 0 || deleting}
+                      loading={deleting}
+                    >
+                      Удалить выбранные
+                    </Button>
                     <Button disabled={selectedDeviceIds.length === 0} icon={<FileDoneOutlined />} type="primary" onClick={() => message.info('Массовое применение в разработке')}>Применить настройки</Button>
                     <Button disabled={selectedDeviceIds.length === 0} onClick={() => setSelectedDeviceIds([])}>Сбросить выбор</Button>
                   </Space>
@@ -457,107 +676,7 @@ export default function DevicesPage({ type }: { type?: string }) {
         {
           key: 'config',
           label: 'Просмотр и сравнение конфигурации',
-          children: (
-            <Card title="Работа с конфигурациями устройства">
-              <Tabs items={[
-                {
-                  key: 'current',
-                  label: 'Текущая',
-                  children: (
-                    <Card size="small" styles={{ body: { padding: 0 } }}>
-                      <div style={{ background: '#111', borderRadius: 8, overflow: 'hidden' }}>
-                        {currentConfigOptions.map((line, idx) => (
-                          <div key={idx} style={{ color: '#7CFC00', fontFamily: 'monospace', padding: '4px 12px' }}>
-                            <Text strong style={{ color: '#7CFC00' }}>{line.option}</Text>: {line.value}
-                          </div>
-                        ))}
-                      </div>
-                    </Card>
-                  ),
-                },
-                {
-                  key: 'history',
-                  label: 'История',
-                  children: (
-                    <Space direction="vertical" style={{ width: '100%' }}>
-                      <Paragraph>Версии конфигурации устройства</Paragraph>
-                      <Table
-                        rowKey="id"
-                        columns={[
-                          { title: 'ID', dataIndex: 'id' },
-                          { title: 'Версия', dataIndex: 'versionNumber' },
-                          { title: 'Дата применения', dataIndex: 'appliedAt', render: (v) => v ? new Date(v).toLocaleString() : '—' },
-                          { title: 'Откат', dataIndex: 'rollbackAvailable', render: (v) => <Tag color={v ? 'success' : 'default'}>{v ? 'доступен' : 'нет'}</Tag> },
-                          {
-                            title: 'Действия',
-                            render: (_, rec) => (
-                              <Button type={rec.id === selectedConfigVersionId ? 'primary' : 'default'} onClick={() => { setSelectedConfigVersionId(rec.id); setTransferredLines({}); }}>Сравнить</Button>
-                            ),
-                          },
-                        ]}
-                        dataSource={configVersions}
-                        pagination={false}
-                      />
-                    </Space>
-                  ),
-                },
-                {
-                  key: 'compare',
-                  label: 'Сравнение',
-                  children: (
-                    <Space direction="vertical" style={{ width: '100%' }} size="large">
-                      <Space wrap>
-                        <Text strong>Версия из БД:</Text>
-                        <Select
-                          value={selectedConfigVersionId}
-                          style={{ minWidth: 360 }}
-                          onChange={(val) => { setSelectedConfigVersionId(val); setTransferredLines({}); }}
-                          options={configVersions.map(v => ({ value: v.id, label: `№ ${v.id} · версия ${v.versionNumber} · ${v.appliedAt ? new Date(v.appliedAt).toLocaleString() : 'без даты'}` }))}
-                        />
-                      </Space>
-                      <Row gutter={16}>
-                        <Col xs={24} lg={12}>
-                          <Card size="small" title="Предыдущая конфигурация" styles={{ body: { padding: 0 } }}>
-                            {diffPanels.previous.map((line, idx) => renderDiffLine(line, idx, 'previous'))}
-                          </Card>
-                        </Col>
-                        <Col xs={24} lg={12}>
-                          <Card size="small" title="Текущая конфигурация" styles={{ body: { padding: 0 } }}>
-                            {diffPanels.current.map((line, idx) => renderDiffLine(line, idx, 'current'))}
-                          </Card>
-                        </Col>
-                      </Row>
-                      <Space wrap>
-                        <Button type="primary" icon={<FileDoneOutlined />}>Применить</Button>
-                        <Button icon={<ReloadOutlined />}>Откатить</Button>
-                        <Button icon={<DownloadOutlined />}>Выгрузить</Button>
-                      </Space>
-                    </Space>
-                  ),
-                },
-                {
-                  key: 'templates',
-                  label: 'Шаблоны',
-                  children: (
-                    <Card title="Пример шаблона baseline">
-                      <Space direction="vertical">
-                        <Paragraph>Шаблон можно применить к выбранным устройствам</Paragraph>
-                        {[
-                          { option: 'hostname.prefix', value: 'office-' },
-                          { option: 'logging.buffered', value: '8192' },
-                        ].map((item) => (
-                          <div key={item.option} style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: 6 }}>
-                            <Text strong>{item.option}</Text>: {item.value}
-                          </div>
-                        ))}
-                        <Button icon={<FileDoneOutlined />} type="primary">Применить шаблон</Button>
-                      </Space>
-                    </Card>
-                  ),
-                },
-              ]} />
-            </Card>
-          ),
+          children: renderConfigTab(),
         },
         {
           key: 'terminal',
@@ -588,7 +707,7 @@ export default function DevicesPage({ type }: { type?: string }) {
         },
       ]} />
 
-      <DeviceTerminal open={showSSH} onClose={() => setShowSSH(false)} device={{ id: selectedDevice?.id || 0, hostname: selectedDevice?.hostname || '', ip: selectedDevice?.ips?.[0] || '', os: 'WINDOWS' }} />
+      <DeviceTerminal open={showSSH} onClose={() => setShowSSH(false)} device={{ id: selectedDevice?.id || 0, hostname: selectedDevice?.hostname || '', ip: selectedDevice?.ips?.[0] || '', os: selectedDevice?.osVersion?.[0] || '' }} />
       <ScanDeviceModal open={showScan} onCancel={() => setShowScan(false)} onScan={handleScan} />
       <AddDeviceModal open={showAddDevice} onCancel={() => setShowAddDevice(false)} onAdd={handleAddDevice} />
       <ConfigLinuxModal open={linuxModalOpen} onClose={() => setLinuxModalOpen(false)} hostname={selectedDevice?.hostname} deviceId={selectedDevice?.id} />

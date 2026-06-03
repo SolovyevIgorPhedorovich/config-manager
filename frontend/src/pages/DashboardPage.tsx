@@ -19,7 +19,7 @@ import {
 } from 'chart.js';
 
 import { devicesApi } from '../api/devicesApi';
-import { auditApi } from '../api/auditApi';
+import { eventApi } from '../api/eventApi';
 import type { Device, AuditLog } from '../types';
 
 const { Title, Text } = Typography;
@@ -70,8 +70,8 @@ export default function DashboardPage() {
       const devicesRes = await devicesApi.getAll();
       setDevices(devicesRes.data);
 
-      const logsRes = await auditApi.getLogs({ size: 10 });
-      setAuditLogs(logsRes.data);
+      //const logsRes = await eventApi.getLogs({ size: 10 });
+      //setAuditLogs(logsRes.data);
     } catch (err) {
       setDevices([]);
       setAuditLogs([]);

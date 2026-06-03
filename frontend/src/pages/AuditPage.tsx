@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, DatePicker, Select, Space, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { auditApi } from '../api/auditApi';
+import { eventApi } from '../api/eventApi';
+import { authApi } from '../api/authApi';
 import type { AuditLog } from '../types';
 
 const { Title, Text } = Typography;
@@ -48,11 +49,30 @@ export default function AuditPage() {
   const [device, setDevice] = useState<string>();
   const [deviceType, setDeviceType] = useState<string>();
   const [result, setResult] = useState<string>();
+  const [currentUser, setCurrentUser] = useState<string>('');
 
+  // Получаем текущего пользователя
+  useEffect(() => {
+    const loadCurrentUser = async () => {
+      try {
+        const token = authApi.getToken();
+        if (token) {
+          const userData = await authApi.getCurrentUser(token);
+          setCurrentUser(typeof userData === 'string' ? userData : userData.username);
+        }
+      } catch (error) {
+        console.error('Failed to load current user:', error);
+      }
+    };
+
+    loadCurrentUser();
+  }, []);
+
+  // Загрузка аудит логов
   useEffect(() => {
     const loadAudit = async () => {
       try {
-        const res = await auditApi.getLogs({ size: 100 });
+        const res = await eventApi.getLogs({ size: 100 });
         const apiRows = res.data.map(mapLogToRow);
         const merged = [
           ...apiRows,
@@ -60,6 +80,7 @@ export default function AuditPage() {
         ];
         setRows(merged.sort((a, b) => b.timestamp - a.timestamp));
       } catch (err) {
+        console.error('Failed to load audit logs:', err);
         setRows(demoAuditRows);
       }
     };
@@ -108,7 +129,10 @@ export default function AuditPage() {
     <Space direction="vertical" style={{ width: '100%' }} size="large">
       <div>
         <Title level={2}>Журнал аудита</Title>
-        <Text type="secondary">Все события со всех устройств, включая события входа в приложение.</Text>
+        <Text type="secondary">
+          Все события со всех устройств, включая события входа в приложение.
+          {currentUser && <span> Текущий пользователь: <Tag color="blue">{currentUser}</Tag></span>}
+        </Text>
       </div>
 
       <Card title="Фильтры аудита">
