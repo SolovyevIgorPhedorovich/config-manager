@@ -12,6 +12,7 @@ export default function ConfigWindowsModal({ open, onClose, hostname, deviceId }
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = React.useState(false);
   const changeComputerName = Form.useWatch('changeComputerName', form);
+  const autoLogonEnabled = Form.useWatch('autoLogonEnabled', form);
 
   const onFinish = async (values: any) => {
     if (!deviceId) return message.error('Не выбрано устройство');
@@ -130,7 +131,7 @@ export default function ConfigWindowsModal({ open, onClose, hostname, deviceId }
         <Form.Item label="Автовход" name="autoLogonEnabled" valuePropName="checked">
           <Switch />
         </Form.Item>
-        {Form.useWatch('autoLogonEnabled', form) && (
+        {autoLogonEnabled && (
           <>
             <Form.Item label="Пользователь" name="autoLogonUser" rules={[{ required: true }]}>
               <Input />
