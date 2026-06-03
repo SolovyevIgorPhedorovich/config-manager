@@ -9,6 +9,9 @@ spring:
     driver-class-name: org.postgresql.Driver
     username: igor
     password: 8008
+  sql:
+    init:
+      mode: always
   jpa:
     hibernate:
       ddl-auto: none
