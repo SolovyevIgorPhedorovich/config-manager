@@ -148,7 +148,22 @@ export default function DevicesPage({ type }: { type?: string }) {
   const loadConfigVersions = async (deviceId: number) => {
     try {
       const res = await devicesApi.getHistory(deviceId);
-      const versions = res.data || [];
+      const data = res.data as any;
+      const versions: ConfigVersion[] = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.history)
+          ? data.history.map((entry: any) => ({
+              id: entry.versionId,
+              deviceId,
+              configType: 0,
+              versionNumber: entry.versionNum ?? entry.versionNumber ?? 0,
+              appliedAt: entry.createdAt,
+              oldConfigJson: entry.oldConfigJson ?? '',
+              newConfig: entry.newConfig ?? '',
+              diffHash: entry.checksum,
+              rollbackAvailable: !!entry.parentVersionId,
+            }))
+          : [];
       setConfigVersions(versions);
       if (versions.length > 0) {
         setSelectedConfigVersionId(versions[0].id);
@@ -161,6 +176,7 @@ export default function DevicesPage({ type }: { type?: string }) {
       setConfigVersions([]);
     }
   };
+
 
 const handleDelete = async (id?: number, hostname?: string) => {
   if (!id) return;
