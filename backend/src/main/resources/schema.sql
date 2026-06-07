@@ -61,10 +61,30 @@ CREATE TABLE IF NOT EXISTS scan_schedules (
     ssh_password    VARCHAR(255),
     winrm_username  VARCHAR(255),
     winrm_password  VARCHAR(255),
+    -- SNMPv3 (USM): логин и пароли аутентификации/шифрования (пароли зашифрованы)
+    snmp_security_name VARCHAR(255),
+    snmp_auth_protocol VARCHAR(20),
+    snmp_auth_password VARCHAR(512),
+    snmp_priv_protocol VARCHAR(20),
+    snmp_priv_password VARCHAR(512),
     last_run_at     TIMESTAMP,
     last_run_status VARCHAR(50),
     created_at      TIMESTAMP    NOT NULL DEFAULT NOW()
 );
+
+-- Профили доступа для сканирования (пароли хранятся зашифрованными)
+CREATE TABLE IF NOT EXISTS scan_credentials (
+    id              BIGSERIAL PRIMARY KEY,
+    name            VARCHAR(255) NOT NULL,
+    domain          VARCHAR(255),
+    ssh_username    VARCHAR(255),
+    ssh_password    VARCHAR(512),
+    winrm_username  VARCHAR(255),
+    winrm_password  VARCHAR(512),
+    created_at      TIMESTAMP    NOT NULL DEFAULT NOW(),
+    CONSTRAINT uk_scan_credentials_name UNIQUE (name)
+);
+ALTER TABLE scan_credentials ADD COLUMN IF NOT EXISTS domain VARCHAR(255);
 
 -- ============================================================
 -- Таблицы, зависящие от device_group / device_os
@@ -181,9 +201,19 @@ CREATE INDEX IF NOT EXISTS idx_template_assignments_device   ON template_assignm
 
 -- scan_schedules: добавляем credential-колонки если отсутствуют
 ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS ssh_username   VARCHAR(255);
-ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS ssh_password   VARCHAR(255);
+ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS ssh_password   VARCHAR(512);
 ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS winrm_username VARCHAR(255);
-ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS winrm_password VARCHAR(255);
+ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS winrm_password VARCHAR(512);
+ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS credential_id  BIGINT;
+-- зашифрованные значения длиннее — расширяем существующие колонки
+ALTER TABLE scan_schedules ALTER COLUMN ssh_password   TYPE VARCHAR(512);
+ALTER TABLE scan_schedules ALTER COLUMN winrm_password TYPE VARCHAR(512);
+-- scan_schedules: SNMPv3 (USM) колонки для сканирования v3-устройств
+ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS snmp_security_name VARCHAR(255);
+ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS snmp_auth_protocol VARCHAR(20);
+ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS snmp_auth_password VARCHAR(512);
+ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS snmp_priv_protocol VARCHAR(20);
+ALTER TABLE scan_schedules ADD COLUMN IF NOT EXISTS snmp_priv_password VARCHAR(512);
 
 -- event_log: удаляем устаревший CHECK constraint (ограничивал только 5 типов событий)
 ALTER TABLE event_log DROP CONSTRAINT IF EXISTS audit_log_action_type_check;

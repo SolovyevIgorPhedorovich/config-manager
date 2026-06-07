@@ -17,6 +17,7 @@ import AdminPage from '../pages/AdminPage';
 import DashboardPage from '../pages/DashboardPage';
 import AuditPage from '../pages/AuditPage';
 import TemplatesPage from '../pages/TemplatesPage';
+import SystemHealthBanner from './SystemHealthBanner';
 
 const { Header, Content, Sider } = Layout;
 const { SubMenu } = Menu;
@@ -101,6 +102,8 @@ function AppWithNavigation() {
           </Space>
         </Dropdown>
       </Header>
+
+      <SystemHealthBanner />
 
       <Layout style={{ paddingTop: 64 }}>
         <Sider

@@ -3,7 +3,8 @@ import { Card, DatePicker, Select, Space, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { eventApi } from '../api/eventApi';
 import { authApi } from '../api/authApi';
-import type { AuditLog } from '../types';
+import type { EventLog } from '../types';
+import { eventActionLabel, eventResult } from '../utils/eventLabels';
 
 const { Title, Text } = Typography;
 
@@ -26,18 +27,24 @@ const demoAuditRows: AuditRow[] = [
   { key: 'rollback-vm', timestamp: Date.now() - 220 * 60_000, datetime: new Date(Date.now() - 220 * 60_000).toLocaleString('ru-RU'), user: 'admin', action: 'Откат конфигурации', device: 'vm-04', deviceType: 'VM / Proxmox', result: 'Ошибка' },
 ];
 
-const mapLogToRow = (log: AuditLog, index: number): AuditRow => {
+const aggregateTypeLabel: Record<string, string> = {
+  DEVICE: 'Устройство',
+  CONFIG: 'Конфигурация',
+  AUTH: 'Приложение',
+};
+
+const mapLogToRow = (log: EventLog, index: number): AuditRow => {
   const timestamp = log.createdAt ? new Date(log.createdAt).getTime() : Date.now() - index * 60_000;
 
   return {
     key: log.id || `api-${index}`,
     timestamp,
     datetime: new Date(timestamp).toLocaleString('ru-RU'),
-    user: log.userId || 'system',
-    action: log.actionType,
-    device: log.targetDeviceId ? `ID ${log.targetDeviceId}` : '—',
-    deviceType: log.targetDeviceId ? 'Устройство' : 'Приложение',
-    result: log.status === 'SUCCESS' ? 'Успех' : log.status === 'FAILED' ? 'Ошибка' : log.status,
+    user: log.userName || (log.userId != null ? `ID ${log.userId}` : 'system'),
+    action: eventActionLabel(log.eventType),
+    device: log.aggregateType === 'DEVICE' && log.aggregateId != null ? `ID ${log.aggregateId}` : '—',
+    deviceType: aggregateTypeLabel[log.aggregateType || ''] || log.aggregateType || 'Приложение',
+    result: eventResult(log.eventType),
   };
 };
 

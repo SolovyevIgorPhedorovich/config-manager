@@ -7,18 +7,21 @@ import com.uniikm.configmanager.integration.adater.WinRMAdapter;
 import com.uniikm.configmanager.integration.dto.DeviceProbeResult;
 import com.uniikm.configmanager.integration.dto.ScanConfig;
 
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.snmp4j.*;
 import org.snmp4j.event.ResponseEvent;
+import org.snmp4j.mp.MPv3;
 import org.snmp4j.mp.SnmpConstants;
+import org.snmp4j.security.*;
 import org.snmp4j.smi.*;
 import org.snmp4j.transport.DefaultUdpTransportMapping;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -41,9 +44,48 @@ public class NetworkProbeService {
     @Value("${network-scan.winrm-connect-timeout:8000}")
     private int winrmConnectTimeoutMs;
 
+    @Value("${ssh.connect-timeout-ms:30000}")
+    private int sshSessionTimeoutMs;
+
+    @Value("${ssh.disconnect-timeout-ms:2000}")
+    private int sshDisconnectTimeoutMs;
+
+    @Value("${winrm.default-port:5985}")
+    private int winrmDefaultPort;
+
+    @Value("${winrm.default-https-port:5986}")
+    private int winrmDefaultHttpsPort;
+
+    @Value("${winrm.command-timeout-ms:30000}")
+    private long winrmCommandTimeoutMs;
+
+    @Value("${winrm.disconnect-timeout-ms:2000}")
+    private int winrmDisconnectTimeoutMs;
+
+    @Value("${snmp.probe-timeout-ms:1500}")
+    private long snmpProbeTimeoutMs;
+
+    @Value("${snmp.probe-retries:1}")
+    private int snmpProbeRetries;
+
     private static final OID OID_SYS_LOCATION = new OID("1.3.6.1.2.1.1.6.0");
     private static final OID OID_SYS_CONTACT  = new OID("1.3.6.1.2.1.1.4.0");
     private static final OID OID_SYS_OBJ_ID   = new OID("1.3.6.1.2.1.1.2.0");
+
+    /** Регистрируем USM auth/priv протоколы (SHA, MD5, AES, DES) один раз при старте. */
+    @PostConstruct
+    void initSnmpSecurityProtocols() {
+        SecurityProtocols.getInstance().addDefaultProtocols();
+    }
+
+    private static void addProbeBindings(PDU pdu) {
+        pdu.add(new VariableBinding(SnmpConstants.sysName));
+        pdu.add(new VariableBinding(SnmpConstants.sysDescr));
+        pdu.add(new VariableBinding(OID_SYS_LOCATION));
+        pdu.add(new VariableBinding(OID_SYS_CONTACT));
+        pdu.add(new VariableBinding(OID_SYS_OBJ_ID));
+        pdu.setType(PDU.GET);
+    }
 
     private static final Pattern CISCO_MODEL_PATTERN = Pattern.compile(
         "(?im)^.*\\bcisco\\s+(?!IOS\\b|Systems\\b|Internetwork\\b)([A-Z0-9][A-Z0-9/._-]{2,})"
@@ -62,43 +104,76 @@ public class NetworkProbeService {
      */
     public DeviceProbeResult probe(String ip, ScanConfig config) {
         if (config.pingEnabled() && !isHostReachable(ip)) {
-            log.debug("Host {} unreachable, skipping", ip);
+            log.debug("[{}] недоступен (ICMP+TCP), пропуск", ip);
             return null;
         }
-        return probeHost(ip, config);
+        DeviceProbeResult result = probeHost(ip, config);
+        if (result == null) {
+            log.debug("[{}] доступен, но не опознан ни по одному протоколу (SNMP/WinRM/SSH/порты)", ip);
+        } else {
+            log.debug("[{}] опознан: метод={}, sysDescr='{}'", ip, result.detectionMethod(), result.sysDescr());
+        }
+        return result;
     }
 
     // ── Protocol probes ───────────────────────────────────────────────────────
 
     private DeviceProbeResult probeHost(String ip, ScanConfig config) {
-        DeviceProbeResult snmpResult = probeViaSNMP(ip, config.snmpPort(), config.community(), config.snmpVersion());
-        if (snmpResult != null) return snmpResult;
+        DeviceProbeResult snmpResult = probeViaSNMP(ip, config);
+        if (snmpResult != null) {
+            log.debug("[{}] опознан по SNMP", ip);
+            return snmpResult;
+        }
 
         boolean winrmHttp  = isPortOpen(ip, 5985);
         boolean winrmHttps = isPortOpen(ip, 5986);
         boolean sshOpen    = isPortOpen(ip, 22);
+        log.debug("[{}] SNMP нет; порты: winrm5985={}, winrm5986={}, ssh22={}", ip, winrmHttp, winrmHttps, sshOpen);
 
         if ((winrmHttp || winrmHttps) && config.hasWinRM()) {
+            log.debug("[{}] порт WinRM открыт + есть креды → WinRM-опрос", ip);
             DeviceProbeResult result = probeViaWinRM(ip, config.winrmUsername(), config.winrmPassword());
             if (result != null) return result;
+            log.debug("[{}] WinRM-опрос не дал результата", ip);
         }
 
         if (sshOpen && config.hasSsh()) {
+            log.debug("[{}] порт 22 открыт + есть SSH-креды → SSH-опрос (user='{}')", ip, config.sshUsername());
             DeviceProbeResult result = probeViaSsh(ip, config.sshUsername(), config.sshPassword());
             if (result != null) return result;
+            log.debug("[{}] SSH-опрос не дал результата", ip);
+        } else if (sshOpen) {
+            log.debug("[{}] порт 22 открыт, но SSH-креды не заданы → определю как Linux по порту", ip);
         }
 
+        // Идентификация по открытым портам, когда SNMP/учётных данных нет.
         if (winrmHttp || winrmHttps) {
+            log.debug("[{}] → Windows (по открытому порту WinRM)", ip);
             return new DeviceProbeResult(ip, ip, "Windows (WinRM port open)", null, null, "Microsoft", null, "PORT");
         }
+        boolean rdpOpen = isPortOpen(ip, 3389);
+        boolean smbOpen = isPortOpen(ip, 445);
+        if (rdpOpen || smbOpen) {
+            log.debug("[{}] → Windows (по портам RDP={}, SMB={})", ip, rdpOpen, smbOpen);
+            return new DeviceProbeResult(ip, ip, "Windows (RDP/SMB port open)", null, null, "Microsoft", null, "PORT");
+        }
         if (sshOpen) {
+            log.debug("[{}] → Linux (по открытому порту 22)", ip);
             return new DeviceProbeResult(ip, ip, "Linux (SSH port open)", null, null, null, null, "PORT");
         }
 
         return null;
     }
 
-    private DeviceProbeResult probeViaSNMP(String ip, int port, String community, String version) {
+    private DeviceProbeResult probeViaSNMP(String ip, ScanConfig config) {
+        // SNMPv3 использует USM (логин + auth/priv пароли), v1/v2c — community-строку.
+        return config.isV3()
+                ? probeViaSNMPv3(ip, config)
+                : probeViaSNMPCommunity(ip, config.snmpPort(), config.community(), config.snmpVersion());
+    }
+
+    /** SNMP v1 / v2c — аутентификация через community-строку. */
+    private DeviceProbeResult probeViaSNMPCommunity(String ip, int port, String community, String version) {
         // Намеренно создаём локальный Snmp-экземпляр, а не используем singleton SnmpClient:
         // сканирование параллельно на сотнях хостов, singleton не thread-safe для concurrent connect().
         TransportMapping<UdpAddress> transport = null;
@@ -112,37 +187,15 @@ public class NetworkProbeService {
             CommunityTarget<Address> target = new CommunityTarget<>();
             target.setCommunity(new OctetString(community));
             target.setAddress(targetAddr);
-            target.setRetries(1);
-            target.setTimeout(1500);
+            target.setRetries(snmpProbeRetries);
+            target.setTimeout(snmpProbeTimeoutMs);
             target.setVersion(resolveSnmpVersion(version));
 
             PDU pdu = new PDU();
-            pdu.add(new VariableBinding(SnmpConstants.sysName));
-            pdu.add(new VariableBinding(SnmpConstants.sysDescr));
-            pdu.add(new VariableBinding(OID_SYS_LOCATION));
-            pdu.add(new VariableBinding(OID_SYS_CONTACT));
-            pdu.add(new VariableBinding(OID_SYS_OBJ_ID));
-            pdu.setType(PDU.GET);
+            addProbeBindings(pdu);
 
             ResponseEvent<Address> response = snmp.send(pdu, target);
-            if (response == null || response.getResponse() == null) return null;
-
-            PDU respPDU = response.getResponse();
-            String hostname = getStringValue(respPDU, SnmpConstants.sysName);
-            if (hostname == null || hostname.isBlank()) return null;
-
-            String sysDescr    = getStringValue(respPDU, SnmpConstants.sysDescr);
-            String sysLocation = getStringValue(respPDU, OID_SYS_LOCATION);
-            String sysContact  = getStringValue(respPDU, OID_SYS_CONTACT);
-
-            return new DeviceProbeResult(
-                    ip, hostname.trim(),
-                    sysDescr != null ? sysDescr.trim() : "Unknown",
-                    sysLocation, sysContact,
-                    extractVendor(sysDescr),
-                    extractModelFromSysDescr(sysDescr),
-                    "SNMP"
-            );
+            return buildResult(ip, response);
         } catch (Exception e) {
             log.debug("SNMP probe failed for {}: {}", ip, e.getMessage());
             return null;
@@ -152,15 +205,118 @@ public class NetworkProbeService {
         }
     }
 
+    /**
+     * SNMP v3 — аутентификация через USM (логин + auth/priv пароли).
+     * Уровень безопасности определяется наличием паролей:
+     *   нет паролей            → noAuthNoPriv
+     *   только auth-пароль      → authNoPriv
+     *   auth + priv пароли      → authPriv
+     * USM создаётся локально для каждого хоста (instance-local MPv3), чтобы не трогать
+     * глобальный SecurityModels — иначе параллельное сканирование ломает друг друга.
+     */
+    private DeviceProbeResult probeViaSNMPv3(String ip, ScanConfig config) {
+        if (config.securityName() == null || config.securityName().isBlank()) {
+            log.debug("SNMPv3 probe for {} skipped: securityName (логин) не задан", ip);
+            return null;
+        }
+
+        TransportMapping<UdpAddress> transport = null;
+        Snmp snmp = null;
+        try {
+            OctetString securityName = new OctetString(config.securityName());
+
+            OID authProto = config.hasV3Auth() ? resolveAuthProtocol(config.authProtocol()) : null;
+            OctetString authPass = config.hasV3Auth() ? new OctetString(config.authPassword()) : null;
+            OID privProto = (authProto != null && config.hasV3Priv()) ? resolvePrivProtocol(config.privProtocol()) : null;
+            OctetString privPass = privProto != null ? new OctetString(config.privPassword()) : null;
+
+            int securityLevel = privProto != null ? SecurityLevel.AUTH_PRIV
+                              : authProto != null ? SecurityLevel.AUTH_NOPRIV
+                              : SecurityLevel.NOAUTH_NOPRIV;
+
+            // Instance-local USM, чтобы не мутировать глобальный SecurityModels при параллельном скане
+            USM usm = new USM(SecurityProtocols.getInstance(), new OctetString(MPv3.createLocalEngineID()), 0);
+            usm.addUser(new UsmUser(securityName, authProto, authPass, privProto, privPass));
+
+            MessageDispatcher dispatcher = new MessageDispatcherImpl();
+            dispatcher.addMessageProcessingModel(new MPv3(usm));
+
+            transport = new DefaultUdpTransportMapping();
+            snmp = new Snmp(dispatcher, transport);
+            transport.listen();
+
+            UserTarget<Address> target = new UserTarget<>();
+            target.setAddress(GenericAddress.parse("udp:" + ip + "/" + config.snmpPort()));
+            target.setVersion(SnmpConstants.version3);
+            target.setSecurityModel(SecurityModel.SECURITY_MODEL_USM);
+            target.setSecurityLevel(securityLevel);
+            target.setSecurityName(securityName);
+            target.setRetries(snmpProbeRetries);
+            target.setTimeout(snmpProbeTimeoutMs);
+
+            ScopedPDU pdu = new ScopedPDU();
+            addProbeBindings(pdu);
+
+            ResponseEvent<Address> response = snmp.send(pdu, target);
+            return buildResult(ip, response);
+        } catch (Exception e) {
+            log.debug("SNMPv3 probe failed for {}: {}", ip, e.getMessage());
+            return null;
+        } finally {
+            if (snmp != null)      try { snmp.close();      } catch (Exception ignored) {}
+            if (transport != null) try { transport.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    /** Разбирает ответ агента в DeviceProbeResult (общий для v1/v2c/v3). */
+    private DeviceProbeResult buildResult(String ip, ResponseEvent<Address> response) {
+        if (response == null || response.getResponse() == null) return null;
+
+        PDU respPDU = response.getResponse();
+        String hostname = getStringValue(respPDU, SnmpConstants.sysName);
+        if (hostname == null || hostname.isBlank()) return null;
+
+        String sysDescr    = getStringValue(respPDU, SnmpConstants.sysDescr);
+        String sysLocation = getStringValue(respPDU, OID_SYS_LOCATION);
+        String sysContact  = getStringValue(respPDU, OID_SYS_CONTACT);
+
+        return new DeviceProbeResult(
+                ip, hostname.trim(),
+                sysDescr != null ? sysDescr.trim() : "Unknown",
+                sysLocation, sysContact,
+                extractVendor(sysDescr),
+                extractModelFromSysDescr(sysDescr),
+                "SNMP"
+        );
+    }
+
+    private OID resolveAuthProtocol(String name) {
+        if (name == null) return AuthSHA.ID;
+        return switch (name.toUpperCase()) {
+            case "MD5"             -> AuthMD5.ID;
+            case "SHA256", "SHA-256" -> AuthHMAC192SHA256.ID;
+            default                -> AuthSHA.ID;   // SHA-1
+        };
+    }
+
+    private OID resolvePrivProtocol(String name) {
+        if (name == null) return PrivAES128.ID;
+        return switch (name.toUpperCase()) {
+            case "DES"             -> PrivDES.ID;
+            case "AES256", "AES-256" -> PrivAES256.ID;
+            default                -> PrivAES128.ID;
+        };
+    }
+
     private DeviceProbeResult probeViaWinRM(String ip, String username, String password) {
-        int[] ports = {5985, 5986};
+        int[] ports = {winrmDefaultPort, winrmDefaultHttpsPort};
         for (int winrmPort : ports) {
             if (!isPortOpen(ip, winrmPort)) continue;
 
-            WinRMAdapter winrm = new WinRMAdapter(ip, winrmPort, username, password);
+            WinRMAdapter winrm = new WinRMAdapter(ip, winrmPort, username, password, null, winrmCommandTimeoutMs);
             DeviceCommandTarget target = new DeviceCommandTarget(
                     ip, winrmPort, username, password, ConnectionProtocol.WINRM,
-                    null, winrmPort == 5986, winrmPort == 5986);
+                    null, winrmPort == winrmDefaultHttpsPort, winrmPort == winrmDefaultHttpsPort);
             try {
                 Map<String, Object> connResult = winrm.connect(target).get(winrmConnectTimeoutMs, TimeUnit.MILLISECONDS);
                 if (!Boolean.TRUE.equals(connResult.get("success"))) continue;
@@ -169,7 +325,7 @@ public class NetworkProbeService {
                              "$cs = Get-CimInstance Win32_ComputerSystem; " +
                              "Write-Output \"$($cs.DNSHostName)|$($os.Caption)|$($os.Version)|$($cs.Manufacturer)|$($cs.Model)\"";
 
-                Map<String, Object> result = winrm.executeCommand(cmd).get(15000, TimeUnit.MILLISECONDS);
+                Map<String, Object> result = winrm.executeCommand(cmd).get(winrmCommandTimeoutMs, TimeUnit.MILLISECONDS);
                 String stdout = (String) result.get("stdout");
 
                 if (stdout != null && !stdout.isBlank()) {
@@ -188,30 +344,34 @@ public class NetworkProbeService {
             } catch (Exception e) {
                 log.debug("WinRM probe failed for {} port {}: {}", ip, winrmPort, e.getMessage());
             } finally {
-                try { winrm.disconnect().get(2000, TimeUnit.MILLISECONDS); } catch (Exception ignored) {}
+                try { winrm.disconnect().get(winrmDisconnectTimeoutMs, TimeUnit.MILLISECONDS); } catch (Exception ignored) {}
             }
         }
         return null;
     }
 
     private DeviceProbeResult probeViaSsh(String ip, String username, String password) {
-        SSHAdapter ssh = new SSHAdapter(ip, 22, username, password);
+        SSHAdapter ssh = new SSHAdapter(ip, 22, username, password, sshSessionTimeoutMs);
         DeviceCommandTarget target = new DeviceCommandTarget(
                 ip, 22, username, password, ConnectionProtocol.SSH, null, false, false);
         try {
             Map<String, Object> connResult = ssh.connect(target).get(sshConnectTimeoutMs, TimeUnit.MILLISECONDS);
             if (!Boolean.TRUE.equals(connResult.get("success"))) {
-                log.debug("SSH connect failed for {}: {}", ip, connResult.get("error"));
+                log.debug("[{}] SSH-подключение не удалось: {}", ip, connResult.get("error"));
                 return null;
             }
+            log.debug("[{}] SSH-подключение успешно, собираю информацию", ip);
 
             String hostname = execSsh(ssh, "hostname 2>/dev/null", 5000);
             String unameA   = execSsh(ssh, "uname -a 2>/dev/null", 5000);
+            log.debug("[{}] SSH: hostname='{}', uname='{}'", ip, hostname, truncate(unameA, 120));
 
             if (unameA != null && unameA.toLowerCase().contains("linux")) {
+                log.debug("[{}] определён как Linux по uname", ip);
                 return buildLinuxProbeData(ip, hostname, unameA, ssh);
             }
 
+            log.debug("[{}] uname без 'linux' → пробую как Cisco", ip);
             return buildCiscoProbeData(ip, ssh);
 
         } catch (TimeoutException e) {
@@ -219,7 +379,7 @@ public class NetworkProbeService {
         } catch (Exception e) {
             log.debug("SSH probe failed for {}: {}", ip, e.getMessage());
         } finally {
-            try { ssh.disconnect().get(2000, TimeUnit.MILLISECONDS); } catch (Exception ignored) {}
+            try { ssh.disconnect().get(sshDisconnectTimeoutMs, TimeUnit.MILLISECONDS); } catch (Exception ignored) {}
         }
         return null;
     }
@@ -277,20 +437,81 @@ public class NetworkProbeService {
         }
     }
 
+    // Типовые TCP-порты живых хостов: SSH, SMB, RDP, WinRM(http/https), HTTP/HTTPS, Telnet, JetDirect(принтеры)
+    private static final int[] REACHABILITY_PORTS = {22, 445, 3389, 5985, 5986, 80, 443, 23, 9100};
+    private static final int REACHABILITY_PORT_TIMEOUT_MS = 400;
+
     private boolean isPortOpen(String ip, int port) {
+        return isPortOpen(ip, port, portScanTimeoutMs);
+    }
+
+    private boolean isPortOpen(String ip, int port, int timeoutMs) {
         try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(ip, port), portScanTimeoutMs);
+            socket.connect(new InetSocketAddress(ip, port), timeoutMs);
             return true;
         } catch (Exception e) {
             return false;
         }
     }
 
+    /**
+     * Хост считается «живым», если отвечает на ICMP (системный ping) ИЛИ открыт типовой TCP-порт.
+     * ВАЖНО: используем системный ping, а не InetAddress.isReachable() — последний без root
+     * почти всегда возвращает false (не может слать ICMP), из-за чего скан не находил ничего.
+     * TCP-проверка дополнительно ловит хосты с заблокированным ICMP (например, Windows-фаервол).
+     */
     private boolean isHostReachable(String ip) {
+        if (systemPing(ip)) {
+            log.debug("[{}] доступен по ICMP (ping)", ip);
+            return true;
+        }
+        for (int port : REACHABILITY_PORTS) {
+            if (isPortOpen(ip, port, REACHABILITY_PORT_TIMEOUT_MS)) {
+                log.debug("[{}] доступен по TCP-порту {}", ip, port);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Системный ICMP-ping (работает без root, в отличие от InetAddress.isReachable).
+     * Linux-формат флагов: -c 1 (один пакет), -W 1 (таймаут ответа, сек).
+     */
+    private boolean systemPing(String ip) {
+        String[] cmd = {"ping", "-c", "1", "-W", "1", ip};
         try {
-            InetAddress inet = InetAddress.getByName(ip);
-            return inet.isReachable(pingTimeoutMs);
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+
+            // читаем вывод команды (ping с -c1 -W1 завершается сам ~за 1с)
+            String output;
+            try (var in = p.getInputStream()) {
+                output = new String(in.readAllBytes(), StandardCharsets.UTF_8).trim();
+            }
+
+            boolean finished = p.waitFor(3, TimeUnit.SECONDS);
+            if (!finished) {
+                p.destroyForcibly();
+                log.info("[{}] ping: ТАЙМАУТ (>3s) | cmd='{}' | output='{}'",
+                        ip, String.join(" ", cmd), output);
+                return false;
+            }
+
+            int code = p.exitValue();
+            boolean ok = code == 0;
+            String oneLine = output.replace("\n", " ⏎ ");
+            if (ok) {
+                log.info("[{}] ping: OK (exit=0) | {}", ip, oneLine);
+            } else {
+                // exit 1 = нет ответа; exit 2 = ошибка (нет прав/нет хоста/нет команды и т.п.)
+                log.info("[{}] ping: НЕ ПРОШЁЛ (exit={}) | cmd='{}' | output='{}'",
+                        ip, code, String.join(" ", cmd), oneLine);
+            }
+            return ok;
         } catch (Exception e) {
+            // сюда попадаем, если самой команды ping нет в PATH / её нельзя запустить
+            log.warn("[{}] ping: НЕ УДАЛОСЬ ЗАПУСТИТЬ команду '{}' — {}: {}",
+                    ip, String.join(" ", cmd), e.getClass().getSimpleName(), e.getMessage());
             return false;
         }
     }

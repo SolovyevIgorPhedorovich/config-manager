@@ -23,6 +23,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.net.InetAddress;
 import java.time.Duration;
@@ -75,9 +76,22 @@ public class NetworkScannerService {
         this.networkProbeService = networkProbeService;
     }
 
+    // v1/v2c + SSH/WinRM (без SNMPv3) — используется планировщиком сканирования
     public ResponseEntity<Map<String, Object>> startScan(
             String ipaddr, int mask, int port,
             String community, String snmpv, String scanMode,
+            String sshUsername, String sshPassword,
+            String winrmUsername, String winrmPassword) {
+        return startScan(ipaddr, mask, port, community, snmpv, scanMode,
+                null, null, null, null, null,
+                sshUsername, sshPassword, winrmUsername, winrmPassword);
+    }
+
+    public ResponseEntity<Map<String, Object>> startScan(
+            String ipaddr, int mask, int port,
+            String community, String snmpv, String scanMode,
+            String securityName, String authProtocol, String authPassword,
+            String privProtocol, String privPassword,
             String sshUsername, String sshPassword,
             String winrmUsername, String winrmPassword) {
 
@@ -89,6 +103,7 @@ public class NetworkScannerService {
 
         ScanConfig config = new ScanConfig(
                 port, community, snmpv,
+                securityName, authProtocol, authPassword, privProtocol, privPassword,
                 sshUsername, sshPassword,
                 winrmUsername, winrmPassword,
                 pingEnabled
@@ -134,6 +149,39 @@ public class NetworkScannerService {
         ));
     }
 
+    /**
+     * Инвентаризация одного устройства: опрашиваем его по сети (SNMP/WinRM/SSH),
+     * обновляем имя и ОС (sysDescr) в БД и возвращаем собранные данные.
+     */
+    @Transactional
+    public Map<String, Object> inventoryDevice(Long deviceId, ScanConfig config) {
+        DeviceInfo device = deviceRepo.findById(deviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Устройство не найдено: " + deviceId));
+
+        String ip = device.getIps().isEmpty() ? device.getHostname() : device.getIps().get(0).getIp();
+        log.info("Инвентаризация устройства {} ({})", device.getHostname(), ip);
+
+        DeviceProbeResult probe = networkProbeService.probe(ip, config);
+        if (probe == null) {
+            Map<String, Object> failure = new LinkedHashMap<>();
+            failure.put("success", false);
+            failure.put("ip", ip);
+            failure.put("message", "Устройство не ответило на опрос (" + ip + ")");
+            return failure;
+        }
+
+        boolean changed = updateDeviceFromProbe(device, probe);
+        if (changed) deviceRepo.save(device);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("updated", changed);
+        result.put("detectionMethod", probe.detectionMethod());
+        result.put("sysDescr", probe.sysDescr());
+        result.put("device", deviceMapper.toResponse(device));
+        return result;
+    }
+
     @Async("taskExecutor")
     public CompletableFuture<List<ScanResultEntry>> scanAsync(
             String ipStart, int mask, String scanMode, ScanConfig config) {
@@ -143,6 +191,10 @@ public class NetworkScannerService {
             if (hostsCount > maxHosts) {
                 throw new IllegalArgumentException("Слишком большая сеть! Максимум хостов: " + maxHosts);
             }
+
+            log.info("=== Старт сканирования: {}/{}, режим='{}', хостов={}, ping={}, ssh={}, winrm={} ===",
+                    ipStart, mask, scanMode, hostsCount, config.pingEnabled(),
+                    config.hasSsh() ? "есть" : "нет", config.hasWinRM() ? "есть" : "нет");
 
             InetAddress startIp = InetAddress.getByName(ipStart);
             byte[] ipBytes = startIp.getAddress();
@@ -178,7 +230,15 @@ public class NetworkScannerService {
             for (DeviceProbeResult probe : probeResults) {
                 try {
                     int typeCode = detectDeviceType(probe.sysDescr());
-                    if (!matchesScanMode(typeCode, scanMode)) continue;
+                    log.info("Хост {}: метод={}, тип(code)={}, hostname='{}', sysDescr='{}'",
+                            probe.ip(), probe.detectionMethod(), typeCode, probe.hostname(),
+                            truncate(probe.sysDescr(), 120));
+
+                    if (!matchesScanMode(typeCode, scanMode)) {
+                        log.info("Хост {}: ПРОПУЩЕН — тип(code={}) не подходит под режим '{}'",
+                                probe.ip(), typeCode, scanMode);
+                        continue;
+                    }
 
                     Optional<DeviceInfo> existing = deviceRepo.findByIp(probe.ip());
                     if (existing.isPresent()) {
@@ -186,14 +246,17 @@ public class NetworkScannerService {
                         boolean changed = updateDeviceFromProbe(device, probe);
                         if (changed) deviceRepo.save(device);
                         DeviceResponse response = deviceMapper.toResponse(device);
+                        log.info("Хост {}: {} (id={})", probe.ip(), changed ? "ОБНОВЛЁН" : "БЕЗ ИЗМЕНЕНИЙ", device.getId());
                         results.add(new ScanResultEntry(response, changed ? "UPDATED" : "EXISTING"));
                     } else {
                         DeviceInfo newDevice = createDeviceFromProbe(probe, typeCode);
-                        DeviceResponse response = deviceMapper.toResponse(deviceRepo.save(newDevice));
+                        DeviceInfo saved = deviceRepo.save(newDevice);
+                        DeviceResponse response = deviceMapper.toResponse(saved);
+                        log.info("Хост {}: ДОБАВЛЕН как новый (id={})", probe.ip(), saved.getId());
                         results.add(new ScanResultEntry(response, "NEW"));
                     }
                 } catch (Exception e) {
-                    log.warn("DB processing error for {}: {}", probe.ip(), e.getMessage());
+                    log.warn("Ошибка обработки {} в БД: {}", probe.ip(), e.getMessage(), e);
                 }
             }
 
@@ -214,13 +277,13 @@ public class NetworkScannerService {
     // ── Domain: определение типа устройства по sysDescr ──────────────────────
 
     private int detectDeviceType(String sysDescr) {
-        if (sysDescr == null) return DeviceType.WINDOWS.getCode();
+        if (sysDescr == null) return DeviceType.PC.getCode();
         String lower = sysDescr.toLowerCase();
         if (lower.contains("windows"))
-            return DeviceType.WINDOWS.getCode();
+            return DeviceType.PC.getCode();
         if (lower.contains("linux") || lower.contains("ubuntu") || lower.contains("debian")
                 || lower.contains("centos") || lower.contains("redhat") || lower.contains("fedora"))
-            return DeviceType.LINUX.getCode();
+            return DeviceType.PC.getCode();
         if (lower.contains("canon") || lower.contains("kyocera") || lower.contains("xerox")
                 || lower.contains("ricoh") || lower.contains("brother") || lower.contains("epson")
                 || (lower.contains("hp") && lower.contains("laserjet")))
@@ -229,17 +292,17 @@ public class NetworkScannerService {
             return DeviceType.CISCO.getCode();
         if (lower.contains("proxmox") || lower.contains("vmware") || lower.contains("esxi"))
             return DeviceType.PROXMOX.getCode();
-        return DeviceType.WINDOWS.getCode();
+        return DeviceType.PC.getCode();
     }
 
     private boolean matchesScanMode(int typeCode, String scanMode) {
         if (scanMode == null || "all".equalsIgnoreCase(scanMode)) return true;
         return switch (scanMode.toLowerCase()) {
-            case "windows", "pc" -> typeCode == DeviceType.WINDOWS.getCode();
-            case "linux", "vm"   -> typeCode == DeviceType.LINUX.getCode() || typeCode == DeviceType.PROXMOX.getCode();
-            case "mfu"           -> typeCode == DeviceType.МФУ.getCode();
-            case "cisco"         -> typeCode == DeviceType.CISCO.getCode();
-            default              -> true;
+            case "windows", "pc", "linux" -> typeCode == DeviceType.PC.getCode();
+            case "vm"    -> typeCode == DeviceType.PROXMOX.getCode();
+            case "mfu"   -> typeCode == DeviceType.МФУ.getCode();
+            case "cisco" -> typeCode == DeviceType.CISCO.getCode();
+            default      -> true;
         };
     }
 
@@ -247,7 +310,9 @@ public class NetworkScannerService {
 
     private boolean updateDeviceFromProbe(DeviceInfo device, DeviceProbeResult probe) {
         boolean changed = false;
-        if (!probe.hostname().equals(device.getHostname())) {
+        // Не понижаем реальное имя до голого IP (PORT-детект отдаёт hostname == ip)
+        boolean hostnameIsJustIp = probe.hostname() != null && probe.hostname().equals(probe.ip());
+        if (!hostnameIsJustIp && !probe.hostname().equals(device.getHostname())) {
             device.setHostname(probe.hostname());
             changed = true;
         }
@@ -326,20 +391,21 @@ public class NetworkScannerService {
     }
 
     private byte[] getNetworkAddressBytes(byte[] ip, int mask) {
-        int full = mask / 8, bits = mask % 8;
-        for (int i = full; i < 4; i++) {
-            if (i == full && bits > 0) ip[i] &= (byte) (0xFF << (8 - bits));
-            else if (i > full)        ip[i] = 0;
+        for (int i = 0; i < 4; i++) {
+            int netBits = mask - i * 8;            // сколько сетевых бит приходится на этот октет
+            if (netBits >= 8) continue;            // октет полностью сетевой — не трогаем
+            if (netBits <= 0) ip[i] = 0;           // октет полностью хостовый → 0
+            else ip[i] &= (byte) (0xFF << (8 - netBits)); // частичный → оставляем старшие netBits
         }
         return ip;
     }
 
     private byte[] getBroadcastAddressBytes(byte[] ip, int mask) {
-        if (mask == 32) return ip;
-        int full = mask / 8, bits = mask % 8;
-        for (int i = full; i < 4; i++) {
-            if (i == full && bits > 0) ip[i] |= (byte) (0xFF >> bits);
-            else if (i > full)         ip[i] = (byte) 0xFF;
+        for (int i = 0; i < 4; i++) {
+            int netBits = mask - i * 8;
+            if (netBits >= 8) continue;            // октет полностью сетевой — не трогаем
+            if (netBits <= 0) ip[i] = (byte) 0xFF; // октет полностью хостовый → 255
+            else ip[i] |= (byte) (0xFF >> netBits); // частичный → младшие (8-netBits) бит в 1
         }
         return ip;
     }

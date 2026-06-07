@@ -26,8 +26,11 @@ import io.jsonwebtoken.security.Keys;
 public class JwtService {
 
     private final Key signingKey;
+    private final long expirationHours;
 
-    public JwtService(@Value("${security.jwt.secret:Zm9yLWRldi1vbmx5LWRvLW5vdC11c2UtaW4tcHJvZHVjdGlvbi1jaGFuZ2UtbWU=}") String secret) {
+    public JwtService(
+            @Value("${security.jwt.secret:Zm9yLWRldi1vbmx5LWRvLW5vdC11c2UtaW4tcHJvZHVjdGlvbi1jaGFuZ2UtbWU=}") String secret,
+            @Value("${security.jwt.expiration-hours:8}") long expirationHours) {
         byte[] keyBytes;
         try {
             keyBytes = Decoders.BASE64.decode(secret);
@@ -35,13 +38,13 @@ public class JwtService {
             keyBytes = secret.getBytes(StandardCharsets.UTF_8);
         }
         this.signingKey = Keys.hmacShaKeyFor(keyBytes);
+        this.expirationHours = expirationHours;
     }
 
     public String generateToken(Authentication authentication) {
         CustomUserDetails user = (CustomUserDetails) authentication.getPrincipal();
         Instant now = Instant.now();
 
-        // Получаем роли пользователя
         List<String> roles = authentication.getAuthorities().stream()
             .map(GrantedAuthority::getAuthority)
             .collect(Collectors.toList());
@@ -49,9 +52,9 @@ public class JwtService {
         return Jwts.builder()
             .subject(user.getUsername())
             .claim("userId", user.getId())
-            .claim("roles", roles)  // Добавляем роли в токен
+            .claim("roles", roles)
             .issuedAt(Date.from(now))
-            .expiration(Date.from(now.plus(8, ChronoUnit.HOURS)))
+            .expiration(Date.from(now.plus(expirationHours, ChronoUnit.HOURS)))
             .signWith(signingKey)
             .compact();
     }

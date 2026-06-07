@@ -74,6 +74,27 @@ public class DeviceInfo {
         this.typeCode = type.getCode();
     }
 
+    public String getOperatingSystem() {
+        if (osVersion == null || osVersion.getName() == null) return null;
+        String lower = osVersion.getName().toLowerCase();
+        if (lower.contains("windows")) return "windows";
+        // Linux и распространённые дистрибутивы → "linux" (иначе фронт не опознаёт ОС)
+        if (lower.contains("linux") || lower.contains("ubuntu") || lower.contains("debian")
+                || lower.contains("centos") || lower.contains("red hat") || lower.contains("redhat")
+                || lower.contains("fedora") || lower.contains("proxmox") || lower.contains("alma")
+                || lower.contains("rocky") || lower.contains("suse") || lower.contains("astra")
+                || lower.contains("alt ") || lower.contains("arch ")) {
+            return "linux";
+        }
+        return lower;
+    }
+
+    /** ПК без явно указанной ОС исторически считается Windows. */
+    public boolean isWindows() {
+        String os = getOperatingSystem();
+        return os == null || "windows".equals(os);
+    }
+
     public void addIp(DeviceIP ip) {
         this.ips.add(ip);
         ip.setDevice(this);

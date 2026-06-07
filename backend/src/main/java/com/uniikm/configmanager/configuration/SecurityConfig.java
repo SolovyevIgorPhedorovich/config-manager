@@ -52,6 +52,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/login").permitAll()   // логин открыт
                 .requestMatchers("/api/v1/auth/user").permitAll()    // проверка токена
                 .requestMatchers("/error").permitAll()
+                .requestMatchers("/actuator/health").permitAll()  // health открыт для мониторинга
                 .anyRequest().authenticated()  // всё остальное требует токена
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

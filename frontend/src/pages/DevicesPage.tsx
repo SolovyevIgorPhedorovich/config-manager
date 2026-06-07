@@ -4,7 +4,9 @@ import { ExclamationCircleOutlined, EyeOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { devicesApi } from '../api/devicesApi';
 import { configApi } from '../api/configApi';
-import type { ConfigVersion, Device } from '../types';
+import { eventApi } from '../api/eventApi';
+import type { ConfigVersion, Device, EventLog } from '../types';
+import { eventActionLabel, eventResult, eventResultColor } from '../utils/eventLabels';
 import SSHClient from '../components/DeviceTerminal';
 import { ArrowRightOutlined, CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined } from "@ant-design/icons"
 import { ScanDeviceModal } from '../components/ScanDeviceModal';
@@ -17,6 +19,7 @@ import ConfigMFUModal from '../components/ConfigMFUModal';
 import ConfigCiscoModal from '../components/ConfigCiscoModal';
 import DeviceTerminal from '../components/DeviceTerminal';
 import ConfigDiffViewer from '../components/ConfigDiffViewer';
+import ConfigFormViewer from '../components/ConfigFormViewer';
 
 const { Text, Paragraph } = Typography;
 const { confirm } = AntModal;
@@ -85,6 +88,13 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [deleting, setDeleting] = useState(false);
   const [activeTabKey, setActiveTabKey] = useState<string>('devices');
 
+  // Журнал событий устройств текущей вкладки
+  const [deviceLogs, setDeviceLogs] = useState<EventLog[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  // id устройства, для которого идёт инвентаризация
+  const [inventoryLoadingId, setInventoryLoadingId] = useState<number | null>(null);
+
   // Модалки конфигурации
   const [linuxModalOpen, setLinuxModalOpen] = useState(false);
   const [windowsModalOpen, setWindowsModalOpen] = useState(false);
@@ -139,6 +149,40 @@ export default function DevicesPage({ type }: { type?: string }) {
       setLoading(false);
     }
   };
+
+  // id устройства -> hostname, для отображения в журнале
+  const deviceNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    devices.forEach((d) => { if (d.id != null) map.set(d.id, d.hostname); });
+    return map;
+  }, [devices]);
+
+  // Загрузка событий для устройств текущей вкладки
+  const loadDeviceAudit = async () => {
+    const ids = devices.map((d) => d.id).filter((id): id is number => id != null);
+    if (ids.length === 0) {
+      setDeviceLogs([]);
+      return;
+    }
+    setAuditLoading(true);
+    try {
+      const res = await eventApi.getLogs({ deviceIds: ids });
+      setDeviceLogs(res.data);
+    } catch (err) {
+      console.error('Не удалось загрузить журнал событий:', err);
+      setDeviceLogs([]);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  // Подгружаем журнал при открытии вкладки и при смене набора устройств
+  useEffect(() => {
+    if (activeTabKey === 'audit') {
+      loadDeviceAudit();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabKey, devices]);
 
   const handleViewConfig = async (device: Device) => {
     setSelectedDevice(device);
@@ -372,7 +416,11 @@ const handleBulkDelete = async () => {
             <Button icon={<EyeOutlined />} onClick={() => handleViewConfig(record)} />
           </Tooltip>
           <Tooltip title="Инвентаризация">
-            <Button icon={<ScanOutlined />} onClick={() => message.info(`Инвентаризация запущена для ${record.hostname}`)} />
+            <Button
+              icon={<ScanOutlined />}
+              loading={inventoryLoadingId === record.id}
+              onClick={() => handleInventory(record)}
+            />
           </Tooltip>
           <Tooltip title="Удалить">
             <Button danger icon={<DeleteOutlined />} onClick={() => handleDelete(record.id, record.hostname)} />
@@ -381,6 +429,115 @@ const handleBulkDelete = async () => {
       ),
     },
   ];
+
+  const auditRows = useMemo(() => (
+    deviceLogs
+      .map((log) => ({
+        key: log.id ?? `${log.aggregateId}-${log.createdAt}`,
+        timestamp: log.createdAt ? new Date(log.createdAt).getTime() : 0,
+        datetime: log.createdAt ? new Date(log.createdAt).toLocaleString('ru-RU') : '—',
+        action: eventActionLabel(log.eventType),
+        deviceName: log.aggregateId != null
+          ? (deviceNameById.get(log.aggregateId) || `ID ${log.aggregateId}`)
+          : '—',
+        user: log.userName || (log.userId != null ? `ID ${log.userId}` : 'system'),
+        result: eventResult(log.eventType),
+        payload: log.payload,
+        metadata: log.metadata,
+      }))
+      .sort((a, b) => b.timestamp - a.timestamp)
+  ), [deviceLogs, deviceNameById]);
+
+  const exportAuditCsv = () => {
+    if (auditRows.length === 0) {
+      message.info('Нет событий для экспорта');
+      return;
+    }
+    const header = ['Дата/время', 'Действие', 'Устройство', 'Пользователь', 'Результат'];
+    const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+    const csv = [
+      header.join(';'),
+      ...auditRows.map((r) => [r.datetime, r.action, r.deviceName, r.user, r.result].map(escape).join(';')),
+    ].join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `audit-${type || 'all'}-${dayjs().format('YYYY-MM-DD')}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const renderAuditTab = () => {
+    const columns: ColumnsType<typeof auditRows[number]> = [
+      { title: 'Дата/время', dataIndex: 'datetime', width: 180, sorter: (a, b) => a.timestamp - b.timestamp, defaultSortOrder: 'descend' },
+      {
+        title: 'Действие',
+        dataIndex: 'action',
+        filters: Array.from(new Set(auditRows.map((r) => r.action))).map((v) => ({ text: v, value: v })),
+        onFilter: (value, record) => record.action === value,
+        render: (value: string) => <Tag color="blue">{value}</Tag>,
+      },
+      {
+        title: 'Устройство',
+        dataIndex: 'deviceName',
+        filters: Array.from(new Set(auditRows.map((r) => r.deviceName))).map((v) => ({ text: v, value: v })),
+        onFilter: (value, record) => record.deviceName === value,
+      },
+      { title: 'Пользователь', dataIndex: 'user', width: 160 },
+      {
+        title: 'Результат',
+        dataIndex: 'result',
+        width: 120,
+        filters: [{ text: 'Успех', value: 'Успех' }, { text: 'Ошибка', value: 'Ошибка' }],
+        onFilter: (value, record) => record.result === value,
+        render: (value: 'Успех' | 'Ошибка') => <Tag color={eventResultColor(value)}>{value}</Tag>,
+      },
+    ];
+
+    return (
+      <Card
+        title="Журнал событий устройств"
+        extra={(
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={loadDeviceAudit} loading={auditLoading}>Обновить</Button>
+            <Button icon={<DownloadOutlined />} onClick={exportAuditCsv}>CSV</Button>
+          </Space>
+        )}
+      >
+        {!auditLoading && auditRows.length === 0 ? (
+          <Empty description="Пока нет событий для устройств этой вкладки" />
+        ) : (
+          <Table
+            rowKey="key"
+            loading={auditLoading}
+            columns={columns}
+            dataSource={auditRows}
+            pagination={{ pageSize: 15, showTotal: (total) => `Всего событий: ${total}` }}
+            expandable={{
+              rowExpandable: (record) => Boolean(record.payload || record.metadata),
+              expandedRowRender: (record) => (
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Text strong>Было:</Text>
+                    <pre style={{ background: '#f5f5f5', padding: 8, margin: '4px 0 0', maxHeight: 240, overflow: 'auto' }}>
+                      {record.payload ? JSON.stringify(record.payload, null, 2) : '—'}
+                    </pre>
+                  </Col>
+                  <Col span={12}>
+                    <Text strong>Стало:</Text>
+                    <pre style={{ background: '#f5f5f5', padding: 8, margin: '4px 0 0', maxHeight: 240, overflow: 'auto' }}>
+                      {record.metadata ? JSON.stringify(record.metadata, null, 2) : '—'}
+                    </pre>
+                  </Col>
+                </Row>
+              ),
+            }}
+          />
+        )}
+      </Card>
+    );
+  };
 
   const renderConfigTab = () => {
     if (!selectedDevice) {
@@ -421,18 +578,13 @@ const handleBulkDelete = async () => {
             key: 'current',
             label: 'Текущая',
             children: (
-              <Card size="small" styles={{ body: { padding: 0 } }}>
-                <div style={{ background: '#111', borderRadius: 8, overflow: 'hidden', padding: '8px 12px' }}>
-                  {diffRightConfig
-                    ? Object.entries(diffRightConfig).map(([k, v]) => (
-                        <div key={k} style={{ color: '#7CFC00', fontFamily: 'monospace', padding: '2px 0' }}>
-                          <Text strong style={{ color: '#7CFC00' }}>{k}</Text>: {JSON.stringify(v)}
-                        </div>
-                      ))
-                    : <Text style={{ color: '#888' }}>Нет данных конфигурации</Text>
-                  }
-                </div>
-              </Card>
+              <ConfigFormViewer
+                config={diffRightConfig}
+                deviceType={selectedDevice.type}
+                deviceId={selectedDevice.id!}
+                hostname={selectedDevice.hostname}
+                onApplied={() => loadConfigVersions(selectedDevice.id!)}
+              />
             ),
           },
           {
@@ -585,12 +737,47 @@ const handleBulkDelete = async () => {
   }, [configVersions, selectedConfigVersionId]);
 
   const openConfigModalByType = (device?: Device) => {
-    const typeCode = device?.typeCode ?? selectedDevice?.typeCode;
+    const target = device ?? selectedDevice ?? undefined;
+    const typeCode = target?.typeCode;
     if (typeCode === 2) return setCiscoModalOpen(true);
     if (typeCode === 1) return setMfuModalOpen(true);
-    if (typeCode === 0) return setWindowsModalOpen(true);
-    if (typeCode === 3) return setLinuxModalOpen(true);
+    // ПК (0) и VM (3) могут быть как Windows, так и Linux — выбираем окно по ОС
+    if (typeCode === 0 || typeCode === 3) {
+      return target?.operatingSystem === 'linux'
+        ? setLinuxModalOpen(true)
+        : setWindowsModalOpen(true);
+    }
     message.info('Выберите устройство из списка');
+  };
+
+  const handleInventory = async (device: Device) => {
+    if (!device.id) return;
+    setInventoryLoadingId(device.id);
+    message.loading({ content: `Инвентаризация ${device.hostname}...`, key: 'inventory', duration: 0 });
+    try {
+      const res = await devicesApi.inventory(device.id);
+      if (res.success) {
+        if (res.device) {
+          setDevices((prev) => prev.map((d) => (d.id === device.id ? { ...d, ...res.device } : d)));
+          setSelectedDevice((prev) => (prev?.id === device.id ? { ...prev, ...res.device } as Device : prev));
+        }
+        message.success({
+          content: res.updated
+            ? `Данные обновлены (${res.detectionMethod ?? 'опрос'})`
+            : `Изменений нет (${res.detectionMethod ?? 'опрос'})`,
+          key: 'inventory',
+        });
+      } else {
+        message.warning({ content: res.message || 'Устройство не ответило на опрос', key: 'inventory' });
+      }
+    } catch (err: any) {
+      message.error({
+        content: `Ошибка инвентаризации: ${err.response?.data?.message || err.message}`,
+        key: 'inventory',
+      });
+    } finally {
+      setInventoryLoadingId(null);
+    }
   };
 
   const handleScan = async (options: any) => {
@@ -742,11 +929,7 @@ const handleBulkDelete = async () => {
         {
           key: 'audit',
           label: 'Журнал аудита',
-          children: (
-            <Card title="Отчет по действиям пользователей" extra={<Space><Button>CSV</Button><Button>PDF</Button></Space>}>
-              <Empty description="API аудита в разработке" />
-            </Card>
-          ),
+          children: renderAuditTab(),
         },
       ]} />
 

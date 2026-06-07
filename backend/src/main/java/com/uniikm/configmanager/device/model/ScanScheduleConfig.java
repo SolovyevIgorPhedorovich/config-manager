@@ -1,5 +1,6 @@
 package com.uniikm.configmanager.device.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -53,17 +54,40 @@ public class ScanScheduleConfig {
     @Builder.Default
     private boolean enabled = true;
 
+    // Ссылка на профиль доступа (scan_credentials). Если задан — креды берутся из него.
+    @Column(name = "credential_id")
+    private Long credentialId;
+
     @Column(name = "ssh_username", length = 255)
     private String sshUsername;
 
-    @Column(name = "ssh_password", length = 255)
+    @Column(name = "ssh_password", length = 512)
     private String sshPassword;
 
     @Column(name = "winrm_username", length = 255)
     private String winrmUsername;
 
-    @Column(name = "winrm_password", length = 255)
+    @Column(name = "winrm_password", length = 512)
     private String winrmPassword;
+
+    // ── SNMPv3 (USM) — для сканирования v3-устройств ──────────────────────────
+    @Column(name = "snmp_security_name", length = 255)
+    private String snmpSecurityName;
+
+    @Column(name = "snmp_auth_protocol", length = 20)
+    private String snmpAuthProtocol;
+
+    // Зашифрован; не отдаём наружу в JSON (только приём через DTO)
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Column(name = "snmp_auth_password", length = 512)
+    private String snmpAuthPassword;
+
+    @Column(name = "snmp_priv_protocol", length = 20)
+    private String snmpPrivProtocol;
+
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Column(name = "snmp_priv_password", length = 512)
+    private String snmpPrivPassword;
 
     @Column(name = "last_run_at")
     private LocalDateTime lastRunAt;

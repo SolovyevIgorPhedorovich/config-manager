@@ -1,5 +1,6 @@
 package com.uniikm.configmanager.device.service;
 
+import com.uniikm.configmanager.common.crypto.SecretCipher;
 import com.uniikm.configmanager.device.dto.ScanScheduleDto;
 import com.uniikm.configmanager.device.model.ScanScheduleConfig;
 import com.uniikm.configmanager.device.repository.ScanScheduleRepository;
@@ -26,6 +27,8 @@ public class ScanScheduleService {
     private final ScanScheduleRepository repository;
     private final NetworkScannerService scannerService;
     private final TaskScheduler scanTaskScheduler;
+    private final SecretCipher cipher;
+    private final ScanCredentialService credentialService;
 
     private final ConcurrentHashMap<Long, ScheduledFuture<?>> activeTasks = new ConcurrentHashMap<>();
 
@@ -56,10 +59,16 @@ public class ScanScheduleService {
                 .scanMode(dto.scanMode())
                 .cronExpression(dto.cronExpression())
                 .enabled(dto.enabled())
+                .credentialId(dto.credentialId())
                 .sshUsername(dto.sshUsername())
-                .sshPassword(dto.sshPassword())
+                .sshPassword(cipher.encrypt(dto.sshPassword()))
                 .winrmUsername(dto.winrmUsername())
-                .winrmPassword(dto.winrmPassword())
+                .winrmPassword(cipher.encrypt(dto.winrmPassword()))
+                .snmpSecurityName(dto.snmpSecurityName())
+                .snmpAuthProtocol(dto.snmpAuthProtocol())
+                .snmpAuthPassword(cipher.encrypt(dto.snmpAuthPassword()))
+                .snmpPrivProtocol(dto.snmpPrivProtocol())
+                .snmpPrivPassword(cipher.encrypt(dto.snmpPrivPassword()))
                 .build();
         ScanScheduleConfig saved = repository.save(config);
         if (saved.isEnabled() && saved.getCronExpression() != null) {
@@ -80,10 +89,25 @@ public class ScanScheduleService {
         config.setScanMode(dto.scanMode());
         config.setCronExpression(dto.cronExpression());
         config.setEnabled(dto.enabled());
+        config.setCredentialId(dto.credentialId());
         config.setSshUsername(dto.sshUsername());
-        config.setSshPassword(dto.sshPassword());
         config.setWinrmUsername(dto.winrmUsername());
-        config.setWinrmPassword(dto.winrmPassword());
+        config.setSnmpSecurityName(dto.snmpSecurityName());
+        config.setSnmpAuthProtocol(dto.snmpAuthProtocol());
+        config.setSnmpPrivProtocol(dto.snmpPrivProtocol());
+        // Пустой пароль в запросе = «не менять» (чтобы не требовать повторного ввода при редактировании)
+        if (dto.sshPassword() != null && !dto.sshPassword().isBlank()) {
+            config.setSshPassword(cipher.encrypt(dto.sshPassword()));
+        }
+        if (dto.winrmPassword() != null && !dto.winrmPassword().isBlank()) {
+            config.setWinrmPassword(cipher.encrypt(dto.winrmPassword()));
+        }
+        if (dto.snmpAuthPassword() != null && !dto.snmpAuthPassword().isBlank()) {
+            config.setSnmpAuthPassword(cipher.encrypt(dto.snmpAuthPassword()));
+        }
+        if (dto.snmpPrivPassword() != null && !dto.snmpPrivPassword().isBlank()) {
+            config.setSnmpPrivPassword(cipher.encrypt(dto.snmpPrivPassword()));
+        }
 
         cancelTask(id);
         ScanScheduleConfig saved = repository.save(config);
@@ -101,12 +125,25 @@ public class ScanScheduleService {
 
     public ResponseEntity<Map<String, Object>> runNow(Long id) {
         ScanScheduleConfig config = getById(id);
+        ScanCredentialService.ResolvedCreds creds = credsFor(config);
         return scannerService.startScan(
                 config.getSubnet(), config.getMask(), config.getPort(),
                 config.getCommunity(), config.getSnmpVersion(), config.getScanMode(),
-                config.getSshUsername(), config.getSshPassword(),
-                config.getWinrmUsername(), config.getWinrmPassword()
+                config.getSnmpSecurityName(), config.getSnmpAuthProtocol(), cipher.decrypt(config.getSnmpAuthPassword()),
+                config.getSnmpPrivProtocol(), cipher.decrypt(config.getSnmpPrivPassword()),
+                creds.sshUsername(), creds.sshPassword(),
+                creds.winrmUsername(), creds.winrmPassword()
         );
+    }
+
+    /** Креды для запуска: из профиля доступа (если задан) либо из собственных полей расписания. */
+    private ScanCredentialService.ResolvedCreds credsFor(ScanScheduleConfig config) {
+        if (config.getCredentialId() != null) {
+            return credentialService.resolve(config.getCredentialId());
+        }
+        return new ScanCredentialService.ResolvedCreds(
+                config.getSshUsername(), cipher.decrypt(config.getSshPassword()),
+                config.getWinrmUsername(), cipher.decrypt(config.getWinrmPassword()));
     }
 
     private void scheduleTask(ScanScheduleConfig config) {
@@ -136,11 +173,14 @@ public class ScanScheduleService {
         if (config == null || !config.isEnabled()) return;
         log.info("Running scheduled scan '{}' id={}", config.getName(), id);
         try {
+            ScanCredentialService.ResolvedCreds creds = credsFor(config);
             scannerService.startScan(
                     config.getSubnet(), config.getMask(), config.getPort(),
                     config.getCommunity(), config.getSnmpVersion(), config.getScanMode(),
-                    config.getSshUsername(), config.getSshPassword(),
-                    config.getWinrmUsername(), config.getWinrmPassword()
+                    config.getSnmpSecurityName(), config.getSnmpAuthProtocol(), cipher.decrypt(config.getSnmpAuthPassword()),
+                    config.getSnmpPrivProtocol(), cipher.decrypt(config.getSnmpPrivPassword()),
+                    creds.sshUsername(), creds.sshPassword(),
+                    creds.winrmUsername(), creds.winrmPassword()
             );
             config.setLastRunAt(LocalDateTime.now());
             config.setLastRunStatus("success");

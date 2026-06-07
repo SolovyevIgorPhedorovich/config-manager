@@ -56,8 +56,11 @@ public class DeviceConfigService {
                     device.getHostname(), device.getType());
 
                 switch (device.getType()) {
-                    case WINDOWS:
-                        return configureWindows(device, configJson);
+                    case PC:
+                        return device.isWindows()
+                                ? configureWindows(device, configJson)
+                                : new ConfigureResult(false,
+                                    "Применение для Linux выполняется через оркестратор конфигураций", null);
                     case CISCO:
                         return configureCisco(device, configJson);
                     case МФУ:

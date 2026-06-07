@@ -82,13 +82,15 @@ public class ConfigOrchestrationService {
         // 3. Сохраняем новую версию
         ConfigVersion newVersion = configVersionService.createNewVersion(newConfig, activeVersionOpt.orElse(null));
 
-        // 4. Генерируем команду в зависимости от типа устройства
+        // 4. Генерируем команду в зависимости от типа устройства.
+        //    Для ПК выбор генератора зависит от ОС (Windows/Linux).
         String command = switch (device.getType()) {
-            case WINDOWS -> windowsCommandGenerator.generateCommand(newConfig);
+            case PC      -> device.isWindows()
+                                ? windowsCommandGenerator.generateCommand(newConfig)
+                                : linuxCommandGenerator.generateCommand(newConfig);
             case CISCO   -> ciscoCommandGenerator.generateCommand(newConfig);
             case PROXMOX -> proxmoxCommandGenerator.generateCommand(newConfig);
             case МФУ     -> mfuCommandGenerator.generateCommand(newConfig);
-            default      -> linuxCommandGenerator.generateCommand(newConfig); // LINUX
         };
 
         DeviceCommandTarget target = buildDeviceCommandTarget(device, creds);
@@ -125,9 +127,9 @@ public class ConfigOrchestrationService {
     private DeviceCommandTarget buildDeviceCommandTarget(DeviceInfo device, DeviceCredentials creds) {
         String ip = device.getIps().isEmpty() ? device.getHostname() : device.getIps().get(0).getIp();
         ConnectionProtocol protocol = switch (device.getType()) {
-            case WINDOWS -> ConnectionProtocol.WINRM;
-            case МФУ     -> ConnectionProtocol.SNMP;
-            default      -> ConnectionProtocol.SSH;
+            case PC  -> device.isWindows() ? ConnectionProtocol.WINRM : ConnectionProtocol.SSH;
+            case МФУ -> ConnectionProtocol.SNMP;
+            default  -> ConnectionProtocol.SSH; // CISCO, PROXMOX
         };
         String community = (creds.getCommunity() != null && !creds.getCommunity().isBlank())
                 ? creds.getCommunity() : "private";

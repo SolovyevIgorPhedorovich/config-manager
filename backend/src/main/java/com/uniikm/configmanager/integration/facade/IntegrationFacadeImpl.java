@@ -7,7 +7,6 @@ import org.springframework.stereotype.Service;
 import com.uniikm.configmanager.common.dto.ConnectionProtocol;
 import com.uniikm.configmanager.common.dto.DeviceCommandTarget;
 import com.uniikm.configmanager.config.dto.DeviceCredentials;
-import com.uniikm.configmanager.device.enums.DeviceType;
 import com.uniikm.configmanager.device.model.DeviceInfo;
 import com.uniikm.configmanager.integration.dto.CommandExecutionRequest;
 import com.uniikm.configmanager.integration.dto.CommandGroupStatus;
@@ -50,10 +49,11 @@ public class IntegrationFacadeImpl implements IntegrationFacade {
                 ? device.getHostname()
                 : device.getIps().get(0).getIp();
 
-        ConnectionProtocol protocol =
-                device.getType() == DeviceType.WINDOWS
-                        ? ConnectionProtocol.WINRM
-                        : ConnectionProtocol.SSH;
+        ConnectionProtocol protocol = switch (device.getType()) {
+            case PC  -> device.isWindows() ? ConnectionProtocol.WINRM : ConnectionProtocol.SSH;
+            case МФУ -> ConnectionProtocol.SNMP;
+            default  -> ConnectionProtocol.SSH; // CISCO, PROXMOX
+        };
 
         return new DeviceCommandTarget(
                 ip,

@@ -31,9 +31,14 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class RemoteCommandService {
 
-    private static final int DEFAULT_SSH_PORT = 22;
-    private static final int DEFAULT_WINRM_PORT = 5985;
-    private static final int DEFAULT_SNMP_PORT = 161;
+    @Value("${ssh.default-port:22}")
+    private int defaultSshPort;
+
+    @Value("${winrm.default-port:5985}")
+    private int defaultWinrmPort;
+
+    @Value("${snmp.default-port:161}")
+    private int defaultSnmpPort;
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -262,9 +267,9 @@ public class RemoteCommandService {
     private int resolvePort(DeviceCommandTarget target) {
         if (target.port() != null) return target.port();
         return switch (target.resolvedProtocol()) {
-            case SSH -> DEFAULT_SSH_PORT;
-            case WINRM -> DEFAULT_WINRM_PORT;
-            case SNMP -> DEFAULT_SNMP_PORT;
+            case SSH   -> defaultSshPort;
+            case WINRM -> defaultWinrmPort;
+            case SNMP  -> defaultSnmpPort;
         };
     }
 

@@ -41,6 +41,9 @@ logging:
     com.example.configmanager: INFO
     org.hibernate.SQL: DEBUG
     org.springframework.security: TRACE
+    # Подробные логи сканирования сети (доступность, опрос, добавление устройств)
+    com.uniikm.configmanager.device.service.NetworkScannerService: DEBUG
+    com.uniikm.configmanager.integration.service.NetworkProbeService: DEBUG
 
 remote-command:
   redis-key-prefix: remote-command

@@ -77,6 +77,19 @@ export interface AuditLog {
   ipAddress?: string;      // Добавлено: IP адрес пользователя
 }
 
+// Запись журнала событий (event_log), как её отдаёт /v1/event/logs
+export interface EventLog {
+  id?: number;
+  userId?: number;
+  userName?: string;
+  eventType: string;                 // DEVICE_ADDED, DEVICE_UPDATED, CONFIG_APPLY_STARTED, ...
+  aggregateType?: string;            // DEVICE, CONFIG, AUTH
+  aggregateId?: number;              // для DEVICE — id устройства
+  payload?: any;                     // состояние "до"
+  metadata?: any;                    // состояние "после"
+  createdAt?: string;
+}
+
 export interface Settings {
   apiUrl: string;
   autoRefreshInterval: number;
@@ -187,9 +200,56 @@ export interface ScanSchedule {
   scanMode: string;
   cronExpression?: string;
   enabled: boolean;
+  credentialId?: number;
+  // SNMPv3 (USM). Пароли только на ввод — с сервера не возвращаются.
+  snmpSecurityName?: string;
+  snmpAuthProtocol?: string;
+  snmpAuthPassword?: string;
+  snmpPrivProtocol?: string;
+  snmpPrivPassword?: string;
   lastRunAt?: string;
   lastRunStatus?: string;
   createdAt?: string;
+}
+
+// Профиль доступа (SSH/WinRM) для сканирования. Пароли с сервера не приходят —
+// только признак наличия (hasSshPassword/hasWinrmPassword).
+export interface ScanCredential {
+  id: number;
+  name: string;
+  domain?: string;
+  sshUsername?: string;
+  hasSshPassword: boolean;
+  winrmUsername?: string;
+  hasWinrmPassword: boolean;
+  createdAt?: string;
+}
+
+export interface ScanCredentialRequest {
+  name: string;
+  domain?: string;
+  sshUsername?: string;
+  sshPassword?: string;
+  winrmUsername?: string;
+  winrmPassword?: string;
+}
+
+// Пользователь приложения (для управления в Администрировании)
+export interface AppUser {
+  id: number;
+  username: string;
+  email?: string;
+  enabled: boolean;
+  roles: string[];
+  createdAt?: string;
+}
+
+export interface AppUserRequest {
+  username: string;
+  password?: string;
+  email?: string;
+  enabled?: boolean;
+  roles?: string[];
 }
 
 export interface Notification {

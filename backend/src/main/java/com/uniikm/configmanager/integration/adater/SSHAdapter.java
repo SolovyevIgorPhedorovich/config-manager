@@ -20,20 +20,27 @@ public class SSHAdapter implements ProtocolAdapter {
     private String username;
     private String password;
     private String privateKeyPath;
-    
+    private int connectTimeoutMs;
+
     private Session session;
     private JSch jsch;
     private final AtomicBoolean connected = new AtomicBoolean(false);
 
     public SSHAdapter() {
         this.port = 22;
+        this.connectTimeoutMs = 30000;
     }
 
     public SSHAdapter(String host, int port, String username, String password) {
+        this(host, port, username, password, 30000);
+    }
+
+    public SSHAdapter(String host, int port, String username, String password, int connectTimeoutMs) {
         this.host = host;
         this.port = port;
         this.username = username;
         this.password = password;
+        this.connectTimeoutMs = connectTimeoutMs;
     }
 
     @Override
@@ -54,7 +61,7 @@ public class SSHAdapter implements ProtocolAdapter {
                 InputStream in = channel.getInputStream();
                 InputStream err = channel.getErrStream();
                 
-                channel.connect(30000); // 30 seconds timeout
+                channel.connect(connectTimeoutMs);
                 
                 StringBuilder output = new StringBuilder();
                 StringBuilder errorOutput = new StringBuilder();
@@ -123,8 +130,8 @@ public class SSHAdapter implements ProtocolAdapter {
                 config.put("StrictHostKeyChecking", "no");
                 session.setConfig(config);
                 
-                session.setTimeout(30000);
-                session.connect(30000);
+                session.setTimeout(connectTimeoutMs);
+                session.connect(connectTimeoutMs);
                 
                 connected.set(true);
                 result.put("success", true);

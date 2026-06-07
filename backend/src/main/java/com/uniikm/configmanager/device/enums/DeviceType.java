@@ -3,11 +3,10 @@ package com.uniikm.configmanager.device.enums;
 import com.uniikm.configmanager.common.interfaces.CodeEnum;
 
 public enum DeviceType implements CodeEnum {
-    WINDOWS(0),
-    LINUX(1),
-    МФУ(2),
-    CISCO(3),
-    PROXMOX(4);
+    PC(0),       // ПК: Windows или Linux — конкретная ОС определяется по DeviceOS
+    МФУ(1),
+    CISCO(2),
+    PROXMOX(3);  // виртуальные машины (VM)
 
     private final int code;
 

@@ -10,8 +10,15 @@ public record ScanScheduleDto(
         String scanMode,
         String cronExpression,
         boolean enabled,
+        Long credentialId,
         String sshUsername,
         String sshPassword,
         String winrmUsername,
-        String winrmPassword
+        String winrmPassword,
+        // SNMPv3 (USM)
+        String snmpSecurityName,
+        String snmpAuthProtocol,
+        String snmpAuthPassword,
+        String snmpPrivProtocol,
+        String snmpPrivPassword
 ) {}

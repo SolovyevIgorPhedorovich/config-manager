@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
   Card, Form, Input, Switch, Button, message, Tabs, InputNumber, Modal,
-  Select, Row, Col, Table, Tag, Space, Popconfirm, TimePicker, Tooltip,
+  Select, Row, Col, Table, Tag, Space, Popconfirm, TimePicker, Tooltip, Alert,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { devicesApi } from '../api/devicesApi';
-import type { ScanSchedule } from '../types';
+import type { ScanSchedule, ScanCredential } from '../types';
+import UserManager from '../components/UserManager';
 
 const { TabPane } = Tabs;
 
@@ -79,12 +80,15 @@ function formatCronHuman(cron?: string): string {
 
 function ScanScheduleTab() {
   const [schedules, setSchedules] = useState<ScanSchedule[]>([]);
+  const [profiles, setProfiles] = useState<ScanCredential[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ScanSchedule | null>(null);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
   const preset = Form.useWatch('schedulePreset', form);
+  const snmpVersion = Form.useWatch('snmpVersion', form);
+  const isV3 = snmpVersion === 'v3';
 
   const loadSchedules = async () => {
     setLoading(true);
@@ -98,7 +102,10 @@ function ScanScheduleTab() {
     }
   };
 
-  useEffect(() => { loadSchedules(); }, []);
+  useEffect(() => {
+    loadSchedules();
+    devicesApi.scanCredentials.getAll().then(setProfiles).catch(() => setProfiles([]));
+  }, []);
 
   const openCreate = () => {
     setEditTarget(null);
@@ -114,6 +121,12 @@ function ScanScheduleTab() {
       dailyTime: dayjs().hour(2).minute(0),
       customCron: '',
       enabled: true,
+      credentialId: undefined,
+      snmpSecurityName: '',
+      snmpAuthProtocol: 'SHA',
+      snmpAuthPassword: '',
+      snmpPrivProtocol: 'AES',
+      snmpPrivPassword: '',
     });
     setModalOpen(true);
   };
@@ -133,6 +146,13 @@ function ScanScheduleTab() {
       dailyTime: cronToTime(record.cronExpression),
       customCron: p === 'custom' ? record.cronExpression : '',
       enabled: record.enabled,
+      credentialId: record.credentialId,
+      snmpSecurityName: record.snmpSecurityName ?? '',
+      snmpAuthProtocol: record.snmpAuthProtocol ?? 'SHA',
+      snmpPrivProtocol: record.snmpPrivProtocol ?? 'AES',
+      // Пароли с сервера не возвращаются — оставляем пустыми (пусто = «не менять» при сохранении)
+      snmpAuthPassword: '',
+      snmpPrivPassword: '',
     });
     setModalOpen(true);
   };
@@ -165,7 +185,17 @@ function ScanScheduleTab() {
         scanMode:      values.scanMode,
         cronExpression,
         enabled:       values.enabled,
+        credentialId:  values.credentialId ?? undefined,
       };
+
+      // SNMPv3 — логин и пароли аутентификации/шифрования
+      if (values.snmpVersion === 'v3') {
+        payload.snmpSecurityName = values.snmpSecurityName || undefined;
+        payload.snmpAuthProtocol = values.snmpAuthProtocol || undefined;
+        payload.snmpAuthPassword = values.snmpAuthPassword || undefined;
+        payload.snmpPrivProtocol = values.snmpPrivProtocol || undefined;
+        payload.snmpPrivPassword = values.snmpPrivPassword || undefined;
+      }
 
       if (editTarget?.id) {
         const updated = await devicesApi.scanSchedules.update(editTarget.id, payload);
@@ -229,7 +259,18 @@ function ScanScheduleTab() {
     {
       title: 'SNMP',
       key: 'snmp',
-      render: (_: any, r: ScanSchedule) => `${r.snmpVersion} / ${r.community}`,
+      render: (_: any, r: ScanSchedule) =>
+        r.snmpVersion === 'v3'
+          ? `v3 / ${r.snmpSecurityName || '—'}`
+          : `${r.snmpVersion} / ${r.community}`,
+    },
+    {
+      title: 'Профиль доступа',
+      key: 'credential',
+      render: (_: any, r: ScanSchedule) => {
+        const p = r.credentialId != null ? profiles.find((x) => x.id === r.credentialId) : undefined;
+        return p ? <Tag color="geekblue">{p.name}</Tag> : <span style={{ color: '#aaa' }}>—</span>;
+      },
     },
     {
       title: 'Расписание',
@@ -344,8 +385,71 @@ function ScanScheduleTab() {
             </Col>
           </Row>
 
+          {isV3 && (
+            <>
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="SNMP v3 использует логин и пароли вместо community"
+                description="Уровень безопасности определяется автоматически: без паролей — noAuthNoPriv, только пароль аутентификации — authNoPriv, оба пароля — authPriv. При редактировании пустой пароль означает «не менять»."
+              />
+              <Form.Item name="snmpSecurityName" label="Логин (Security Name)">
+                <Input autoComplete="off" placeholder="например, snmpadmin" />
+              </Form.Item>
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item name="snmpAuthProtocol" label="Протокол аутентификации">
+                    <Select options={[
+                      { value: 'SHA',    label: 'SHA-1' },
+                      { value: 'SHA256', label: 'SHA-256' },
+                      { value: 'MD5',    label: 'MD5' },
+                    ]} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="snmpAuthPassword" label="Пароль аутентификации">
+                    <Input.Password autoComplete="new-password" placeholder="пусто — noAuthNoPriv" />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item name="snmpPrivProtocol" label="Протокол шифрования">
+                    <Select options={[
+                      { value: 'AES',    label: 'AES-128' },
+                      { value: 'AES256', label: 'AES-256' },
+                      { value: 'DES',    label: 'DES' },
+                    ]} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="snmpPrivPassword" label="Пароль шифрования">
+                    <Input.Password autoComplete="new-password" placeholder="пусто — authNoPriv" />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </>
+          )}
+
           <Form.Item name="scanMode" label="Режим сканирования" rules={[{ required: true }]}>
             <Select options={SCAN_MODE_OPTIONS} />
+          </Form.Item>
+
+          <Form.Item
+            name="credentialId"
+            label="Профиль доступа (SSH/WinRM)"
+            tooltip="Креды для опроса Windows/Linux. Пароли хранятся зашифрованно. Управление профилями — при ручном сканировании."
+          >
+            <Select
+              allowClear
+              placeholder="Без профиля (только SNMP)"
+              options={profiles.map((p) => ({
+                value: p.id,
+                label: `${p.name}${p.domain ? ` · ${p.domain}` : ''}`,
+              }))}
+              notFoundContent="Профилей пока нет"
+            />
           </Form.Item>
 
           <Form.Item name="schedulePreset" label="Периодичность" rules={[{ required: true }]}>
@@ -567,6 +671,10 @@ export default function AdminPage() {
               Сохранить общие настройки
             </Button>
           </Form>
+        </TabPane>
+
+        <TabPane tab="Пользователи" key="users">
+          <UserManager />
         </TabPane>
 
         <TabPane tab="Расписание сканирования" key="scan-schedule">

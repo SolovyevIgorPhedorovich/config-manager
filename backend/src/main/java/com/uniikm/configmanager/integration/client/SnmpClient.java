@@ -8,6 +8,7 @@ import org.snmp4j.event.ResponseEvent;
 import org.snmp4j.mp.SnmpConstants;
 import org.snmp4j.smi.*;
 import org.snmp4j.transport.DefaultUdpTransportMapping;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -16,6 +17,15 @@ import java.util.Map;
 
 @Component
 public class SnmpClient {
+
+    @Value("${snmp.timeout-ms:3000}")
+    private long timeoutMs;
+
+    @Value("${snmp.retries:2}")
+    private int retries;
+
+    @Value("${snmp.default-version:v2c}")
+    private String defaultVersion;
 
     private Snmp snmp;
     private CommunityTarget target;
@@ -33,13 +43,21 @@ public class SnmpClient {
             target = new CommunityTarget();
             target.setCommunity(new OctetString(community));
             target.setAddress(targetAddress);
-            target.setRetries(2);
-            target.setTimeout(3000);
-            target.setVersion(SnmpConstants.version2c);
+            target.setRetries(retries);
+            target.setTimeout(timeoutMs);
+            target.setVersion(resolveVersion(defaultVersion));
 
         } catch (IOException e) {
             throw new RuntimeException("Failed to initialize SNMP connection", e);
         }
+    }
+
+    private int resolveVersion(String version) {
+        return switch (version.toLowerCase()) {
+            case "v1"  -> SnmpConstants.version1;
+            case "v3"  -> SnmpConstants.version3;
+            default    -> SnmpConstants.version2c;
+        };
     }
 
     public Map<String, String> get(String oid) {
