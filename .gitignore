@@ -1,0 +1,26 @@
+# ── Agent / IDE ────────────────────────────────────────────
+.claude/
+.idea/
+*.iml
+.vscode/
+
+# ── Backend: Gradle / сборка ───────────────────────────────
+backend/build/
+backend/bin/
+backend/.gradle/
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+
+# ── Frontend: Node / Vite ──────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+**/node_modules/
+
+# ── Логи / временное ───────────────────────────────────────
+*.log
+*.tmp
+
+# ── OS ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
