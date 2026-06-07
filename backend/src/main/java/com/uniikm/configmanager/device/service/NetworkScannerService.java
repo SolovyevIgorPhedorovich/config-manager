@@ -18,6 +18,7 @@ import com.uniikm.configmanager.integration.dto.ScanConfig;
 import com.uniikm.configmanager.integration.service.NetworkProbeService;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +30,7 @@ import java.net.InetAddress;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -44,6 +46,7 @@ public class NetworkScannerService {
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
     private final NetworkProbeService networkProbeService;
+    private final Executor taskExecutor;
 
     @Value("${network-scan.redis-key-prefix:network-scan}")
     private String redisKeyPrefix;
@@ -66,7 +69,8 @@ public class NetworkScannerService {
                                  DeviceMapper deviceMapper,
                                  ObjectMapper objectMapper,
                                  StringRedisTemplate redisTemplate,
-                                 NetworkProbeService networkProbeService) {
+                                 NetworkProbeService networkProbeService,
+                                 @Qualifier("taskExecutor") Executor taskExecutor) {
         this.deviceRepo = deviceRepo;
         this.deviceGroupRepo = deviceGroupRepo;
         this.deviceOSRepo = deviceOSRepo;
@@ -74,6 +78,7 @@ public class NetworkScannerService {
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
         this.networkProbeService = networkProbeService;
+        this.taskExecutor = taskExecutor;
     }
 
     // v1/v2c + SSH/WinRM (без SNMPv3) — используется планировщиком сканирования
@@ -110,13 +115,17 @@ public class NetworkScannerService {
         );
         String taskId = UUID.randomUUID().toString();
 
-        CompletableFuture<List<ScanResultEntry>> future = scanAsync(ipaddr, mask, scanMode, config);
-        future.thenAccept(results -> saveScanResult(taskId, results))
-              .exceptionally(ex -> {
-                  log.error("Scan failed for taskId {}: {}", taskId, ex.getMessage());
-                  saveScanResult(taskId, List.of());
-                  return null;
-              });
+        // Запускаем скан в фоне через executor (а НЕ self-invocation @Async,
+        // который не работает при вызове метода из того же класса и блокировал HTTP-поток).
+        taskExecutor.execute(() -> {
+            try {
+                List<ScanResultEntry> results = scanAsync(ipaddr, mask, scanMode, config).join();
+                saveScanResult(taskId, results);
+            } catch (Exception ex) {
+                log.error("Scan failed for taskId {}: {}", taskId, ex.getMessage(), ex);
+                saveScanResult(taskId, List.of());
+            }
+        });
 
         return ResponseEntity.ok(Map.of(
                 "taskId", taskId,
