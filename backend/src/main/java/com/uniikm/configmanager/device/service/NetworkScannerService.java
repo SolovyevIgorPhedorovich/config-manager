@@ -34,6 +34,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Service
@@ -119,7 +120,7 @@ public class NetworkScannerService {
         // который не работает при вызове метода из того же класса и блокировал HTTP-поток).
         taskExecutor.execute(() -> {
             try {
-                List<ScanResultEntry> results = scanAsync(ipaddr, mask, scanMode, config).join();
+                List<ScanResultEntry> results = scanAsync(taskId, ipaddr, mask, scanMode, config).join();
                 saveScanResult(taskId, results);
             } catch (Exception ex) {
                 log.error("Scan failed for taskId {}: {}", taskId, ex.getMessage(), ex);
@@ -137,12 +138,20 @@ public class NetworkScannerService {
     public ResponseEntity<Object> getResult(String taskId) {
         List<ScanResultEntry> results = getScanResult(taskId);
         if (results == null) {
-            return ResponseEntity.ok(Map.of(
-                    "status", "running",
-                    "message", "Сканирование ещё не завершено"
-            ));
+            int[] prog = readProgress(taskId);
+            int scanned = prog != null ? prog[0] : 0;
+            int total   = prog != null ? prog[1] : 0;
+            int percent = total > 0 ? (int) (scanned * 100L / total) : 0;
+            Map<String, Object> running = new LinkedHashMap<>();
+            running.put("status", "running");
+            running.put("scanned", scanned);
+            running.put("total", total);
+            running.put("percent", percent);
+            running.put("message", "Сканирование: " + scanned + "/" + total);
+            return ResponseEntity.ok(running);
         }
         redisTemplate.delete(taskKey(taskId));
+        redisTemplate.delete(progressKey(taskId));
 
         long newCount      = results.stream().filter(r -> "NEW".equals(r.scanStatus())).count();
         long existingCount = results.stream().filter(r -> "EXISTING".equals(r.scanStatus())).count();
@@ -193,7 +202,7 @@ public class NetworkScannerService {
 
     @Async("taskExecutor")
     public CompletableFuture<List<ScanResultEntry>> scanAsync(
-            String ipStart, int mask, String scanMode, ScanConfig config) {
+            String taskId, String ipStart, int mask, String scanMode, ScanConfig config) {
         try {
             validateMask(mask);
             int hostsCount = (int) Math.pow(2, 32 - mask);
@@ -208,15 +217,25 @@ public class NetworkScannerService {
             InetAddress startIp = InetAddress.getByName(ipStart);
             byte[] ipBytes = startIp.getAddress();
 
+            // Список адресов для опроса (без network/broadcast) — нужен, чтобы знать total для прогресса
+            List<String> ipsToScan = new ArrayList<>();
+            for (int i = 0; i < hostsCount; i++) {
+                String ipStr = incrementIp(ipBytes, i);
+                if (!isNetworkOrBroadcast(ipStr, mask)) ipsToScan.add(ipStr);
+            }
+            final int total = ipsToScan.size();
+            final AtomicInteger done = new AtomicInteger(0);
+            saveProgress(taskId, 0, total);
+
             ExecutorService executor = Executors.newFixedThreadPool(threadPoolSize);
             List<CompletableFuture<DeviceProbeResult>> probeFutures = new ArrayList<>();
 
-            for (int i = 0; i < hostsCount; i++) {
-                final String ipStr = incrementIp(ipBytes, i);
-                if (isNetworkOrBroadcast(ipStr, mask)) continue;
-
-                probeFutures.add(CompletableFuture.supplyAsync(
-                        () -> networkProbeService.probe(ipStr, config), executor));
+            for (String ipStr : ipsToScan) {
+                probeFutures.add(CompletableFuture.supplyAsync(() -> {
+                    DeviceProbeResult r = networkProbeService.probe(ipStr, config);
+                    saveProgress(taskId, done.incrementAndGet(), total);
+                    return r;
+                }, executor));
             }
 
             int futureTimeoutMs = networkProbeService.getPingTimeoutMs() + 15000;
@@ -456,5 +475,31 @@ public class NetworkScannerService {
 
     private String taskKey(String taskId) {
         return redisKeyPrefix + ":task:" + taskId;
+    }
+
+    // ── Прогресс сканирования (done/total) ─────────────────────────────────────
+
+    private String progressKey(String taskId) {
+        return redisKeyPrefix + ":progress:" + taskId;
+    }
+
+    private void saveProgress(String taskId, int done, int total) {
+        try {
+            redisTemplate.opsForValue().set(progressKey(taskId), done + "/" + total, resultTtl);
+        } catch (Exception e) {
+            log.debug("Не удалось сохранить прогресс {}: {}", taskId, e.getMessage());
+        }
+    }
+
+    /** Возвращает [done, total] или null, если прогресс ещё не записан. */
+    private int[] readProgress(String taskId) {
+        String v = redisTemplate.opsForValue().get(progressKey(taskId));
+        if (v == null || !v.contains("/")) return null;
+        try {
+            String[] p = v.split("/", 2);
+            return new int[]{ Integer.parseInt(p[0]), Integer.parseInt(p[1]) };
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 }

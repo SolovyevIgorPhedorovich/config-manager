@@ -78,6 +78,7 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [showAddDevice, setShowAddDevice] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
+  const [scanStats, setScanStats] = useState<{ scanned: number; total: number }>({ scanned: 0, total: 0 });
   const [terminalCommand, setTerminalCommand] = useState('');
   const [terminalConnected, setTerminalConnected] = useState(false);
   const [deviceSearch, setDeviceSearch] = useState('');
@@ -794,13 +795,15 @@ const handleBulkDelete = async () => {
       message.info('Сканирование запущено...');
 
       let statusData: any = { status: 'running' };
-      let progress = 0;
 
       while (statusData.status === 'running') {
         await new Promise(r => setTimeout(r, 1500));
         statusData = await devicesApi.getScanStatus(taskId);
-        progress = Math.min(progress + 12, 90);
-        setScanProgress(progress);
+        // Реальный прогресс от числа просканированных адресов (backend отдаёт scanned/total/percent)
+        if (typeof statusData.percent === 'number') {
+          setScanProgress(statusData.percent);
+          setScanStats({ scanned: statusData.scanned ?? 0, total: statusData.total ?? 0 });
+        }
       }
 
       setScanProgress(100);
@@ -867,7 +870,7 @@ const handleBulkDelete = async () => {
                   <Button icon={<PlusCircleOutlined />} onClick={() => setShowAddDevice(true)}>Добавить устройство</Button>
                 </Space>
               </div>
-              {isScanning && <ScanProgress progress={scanProgress} />}
+              {isScanning && <ScanProgress progress={scanProgress} scanned={scanStats.scanned} total={scanStats.total} />}
               <Card style={{ marginBottom: 16 }}>
                 <Search placeholder="Поиск по имени, IP, группе, ОС, производителю, модели или типу" value={deviceSearch} onChange={e => setDeviceSearch(e.target.value)} style={{ maxWidth: 620 }} />
               </Card>

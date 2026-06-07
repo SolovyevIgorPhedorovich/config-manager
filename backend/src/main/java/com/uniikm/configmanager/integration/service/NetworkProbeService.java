@@ -19,6 +19,7 @@ import org.snmp4j.transport.DefaultUdpTransportMapping;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -147,19 +148,20 @@ public class NetworkProbeService {
         }
 
         // Идентификация по открытым портам, когда SNMP/учётных данных нет.
+        // Имя берём из обратного DNS (PTR), иначе — IP.
         if (winrmHttp || winrmHttps) {
             log.debug("[{}] → Windows (по открытому порту WinRM)", ip);
-            return new DeviceProbeResult(ip, ip, "Windows (WinRM port open)", null, null, "Microsoft", null, "PORT");
+            return new DeviceProbeResult(ip, reverseHost(ip), "Windows (WinRM port open)", null, null, "Microsoft", null, "PORT");
         }
         boolean rdpOpen = isPortOpen(ip, 3389);
         boolean smbOpen = isPortOpen(ip, 445);
         if (rdpOpen || smbOpen) {
             log.debug("[{}] → Windows (по портам RDP={}, SMB={})", ip, rdpOpen, smbOpen);
-            return new DeviceProbeResult(ip, ip, "Windows (RDP/SMB port open)", null, null, "Microsoft", null, "PORT");
+            return new DeviceProbeResult(ip, reverseHost(ip), "Windows (RDP/SMB port open)", null, null, "Microsoft", null, "PORT");
         }
         if (sshOpen) {
             log.debug("[{}] → Linux (по открытому порту 22)", ip);
-            return new DeviceProbeResult(ip, ip, "Linux (SSH port open)", null, null, null, null, "PORT");
+            return new DeviceProbeResult(ip, reverseHost(ip), "Linux (SSH port open)", null, null, null, null, "PORT");
         }
 
         return null;
@@ -514,6 +516,22 @@ public class NetworkProbeService {
                     ip, String.join(" ", cmd), e.getClass().getSimpleName(), e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Обратный DNS (PTR): возвращает доменное имя хоста или сам IP, если PTR-записи нет.
+     * Используется, когда устройство опознано только по открытому порту (нет SNMP/SSH-имени).
+     */
+    private String reverseHost(String ip) {
+        try {
+            String name = InetAddress.getByName(ip).getCanonicalHostName();
+            if (name != null && !name.isBlank() && !name.equals(ip)) {
+                return name;
+            }
+        } catch (Exception ignored) {
+            // нет PTR / DNS недоступен — оставляем IP
+        }
+        return ip;
     }
 
     public String extractVendor(String sysDescr) {
