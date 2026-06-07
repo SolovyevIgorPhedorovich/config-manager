@@ -25,6 +25,17 @@ spring:
       port: 6379
       timeout: 2000ms
 
+management:
+  endpoints:
+    web:
+      base-path: /api/actuator   # под /api, чтобы проходило через vite-прокси
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+
 network-scan:
   redis-key-prefix: network-scan
   result-ttl: PT5M

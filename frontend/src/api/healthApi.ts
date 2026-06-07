@@ -17,5 +17,5 @@ export interface SystemHealth {
 
 export const fetchHealth = (): Promise<SystemHealth> =>
   axios
-    .get<SystemHealth>('/actuator/health', { timeout: 5000 })
+    .get<SystemHealth>('/api/actuator/health', { timeout: 5000 })
     .then((r) => r.data);
