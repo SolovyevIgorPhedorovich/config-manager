@@ -1,0 +1,51 @@
+# Функциональный стенд: по одному-двум устройствам каждого типа с фиксированными
+# IP. Бэкенд сканирует сеть 172.100.100.0/24 и должен опознать все типы.
+#
+#   Запуск:   sudo containerlab deploy -t functional.clab.yml
+#   Удаление: sudo containerlab destroy -t functional.clab.yml
+#
+# Образ device-sim собирается заранее:
+#   docker build -t configmanager/device-sim:latest ../device-sim
+name: configmanager
+
+mgmt:
+  network: clab-cfgmgr
+  ipv4-subnet: 172.100.100.0/24
+
+topology:
+  defaults:
+    kind: linux
+    image: configmanager/device-sim:latest
+  nodes:
+    # ── Cisco (SNMP + эмуляция IOS по SSH) ────────────────────────────────
+    sw-core-01:
+      mgmt-ipv4: 172.100.100.11
+      env: { DEVICE_TYPE: cisco, SYS_NAME: sw-core-01 }
+    sw-access-02:
+      mgmt-ipv4: 172.100.100.12
+      env: { DEVICE_TYPE: cisco, SYS_NAME: sw-access-02 }
+
+    # ── Linux PC (SNMP + реальный SSH, применяем конфиг по SSH) ────────────
+    linux-srv-01:
+      mgmt-ipv4: 172.100.100.21
+      env: { DEVICE_TYPE: linux, SYS_NAME: linux-srv-01 }
+
+    # ── Linux без SNMP — проверка ветки определения по SSH (uname) ─────────
+    linux-sshonly-02:
+      mgmt-ipv4: 172.100.100.22
+      env: { DEVICE_TYPE: linux, SYS_NAME: linux-sshonly-02, ENABLE_SNMP: "false" }
+
+    # ── Windows PC (SNMP; WinRM в контейнере не поднимаем) ─────────────────
+    win-ws-01:
+      mgmt-ipv4: 172.100.100.31
+      env: { DEVICE_TYPE: windows, SYS_NAME: win-ws-01, ENABLE_SSH: "false" }
+
+    # ── МФУ / принтер (SNMP) ──────────────────────────────────────────────
+    printer-01:
+      mgmt-ipv4: 172.100.100.41
+      env: { DEVICE_TYPE: mfu, SYS_NAME: printer-01, ENABLE_SSH: "false" }
+
+    # ── Proxmox / VM (SNMP + SSH) ─────────────────────────────────────────
+    pve-node-01:
+      mgmt-ipv4: 172.100.100.51
+      env: { DEVICE_TYPE: proxmox, SYS_NAME: pve-node-01 }

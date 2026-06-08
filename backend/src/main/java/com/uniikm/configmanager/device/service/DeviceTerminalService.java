@@ -83,6 +83,40 @@ public class DeviceTerminalService {
             });
     }
     
+    /** Является ли соединение сессии интерактивным (PTY-shell со стримингом). */
+    public boolean isInteractive(String sessionId) {
+        TerminalSession session = sessions.get(sessionId);
+        return session != null && session.getConnection().isInteractive();
+    }
+
+    /**
+     * Записать нажатия клавиш в интерактивную сессию. Вывод приходит асинхронно
+     * через слушателя, заданного в {@link #attachOutput}.
+     */
+    public void writeInput(String sessionId, String data) {
+        TerminalSession session = getSessionOrThrow(sessionId);
+        if (session.getState() != SessionState.CONNECTED) {
+            log.debug("Ввод в неподключённую сессию {} (состояние {}) — отброшен",
+                sessionId, session.getState());
+            return;
+        }
+        session.getConnection().write(data);
+    }
+
+    /** Подписать потребителя на потоковый вывод интерактивной сессии. */
+    public void attachOutput(String sessionId, java.util.function.Consumer<String> consumer) {
+        TerminalSession session = getSessionOrThrow(sessionId);
+        session.getConnection().onOutput(consumer);
+    }
+
+    /** Изменить размер PTY. */
+    public void resize(String sessionId, int cols, int rows) {
+        TerminalSession session = sessions.get(sessionId);
+        if (session != null) {
+            session.getConnection().resize(cols, rows);
+        }
+    }
+
     /**
      * Закрыть сессию
      * @param sessionId строковой ID сессии

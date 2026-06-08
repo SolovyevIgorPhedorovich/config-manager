@@ -90,8 +90,28 @@ public class TerminalFacadeImpl implements TerminalFacade {
             });
     }
     
+    @Override
+    public boolean isInteractive(String sessionId) {
+        return terminalService.isInteractive(sessionId);
+    }
+
+    @Override
+    public void writeInput(String sessionId, String data) {
+        terminalService.writeInput(sessionId, data);
+    }
+
+    @Override
+    public void attachOutput(String sessionId, java.util.function.Consumer<String> consumer) {
+        terminalService.attachOutput(sessionId, consumer);
+    }
+
+    @Override
+    public void resize(String sessionId, int cols, int rows) {
+        terminalService.resize(sessionId, cols, rows);
+    }
+
     // Приватные методы
-    
+
     private DeviceCommandTarget createCommandTarget(
             TerminalSessionRequest request, 
             ConnectionProtocol protocol) {

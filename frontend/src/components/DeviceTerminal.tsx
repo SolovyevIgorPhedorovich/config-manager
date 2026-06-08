@@ -92,10 +92,11 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
           const isWindows = device?.os === 'WINDOWS';
 
           if (!isWindows) {
-            // Linux/SSH: каждый символ сразу
+            // Linux/SSH: интерактивный PTY — шлём сырые нажатия, эхо приходит от сервера
             socketRef.current.send(
               JSON.stringify({
                 sessionId: sessionIdRef.current,
+                type: 'input',
                 input: data,
               })
             );
@@ -107,6 +108,7 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
                 socketRef.current.send(
                   JSON.stringify({
                     sessionId: sessionIdRef.current,
+                    type: 'input',
                     input: command + '\r\n',
                   })
                 );
@@ -115,6 +117,7 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
                 socketRef.current.send(
                   JSON.stringify({
                     sessionId: sessionIdRef.current,
+                    type: 'input',
                     input: '\r\n',
                   })
                 );
@@ -130,6 +133,7 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
               socketRef.current.send(
                 JSON.stringify({
                   sessionId: sessionIdRef.current,
+                  type: 'input',
                   input: data,
                 })
               );
@@ -138,6 +142,15 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
               term.write(data);
             }
           }
+        }
+      });
+
+      // При изменении размера терминала синхронизируем PTY на сервере
+      term.onResize(({ cols, rows }) => {
+        if (socketRef.current?.readyState === WebSocket.OPEN && sessionIdRef.current) {
+          socketRef.current.send(
+            JSON.stringify({ sessionId: sessionIdRef.current, type: 'resize', cols, rows })
+          );
         }
       });
 
@@ -207,6 +220,17 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
 
       socket.onopen = () => {
         message.success('Соединение установлено');
+        // Привязываем WebSocket к терминальной сессии и запускаем стриминг вывода.
+        const term = terminalRef.current;
+        fitAddonRef.current?.fit();
+        socket.send(
+          JSON.stringify({
+            sessionId: sessionIdRef.current,
+            type: 'init',
+            cols: term?.cols ?? 80,
+            rows: term?.rows ?? 24,
+          })
+        );
         setTimeout(() => terminalRef.current?.focus(), 200);
       };
 
