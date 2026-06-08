@@ -2,29 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Modal, Button, Form, InputNumber, Input, message, Typography } from 'antd';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
+import 'xterm/css/xterm.css'; // обязателен: позиционирует helper-textarea, через который xterm ловит клавиатуру
 import { devicesApi } from '../api/devicesApi';
 
 const { Text } = Typography;
-
-// Принудительно скрываем вспомогательный textarea (чтобы не мешал)
-const hideHelperTextareaStyle = `
-  .xterm-helper-textarea {
-    position: absolute !important;
-    left: -99999em !important;
-    top: -99999em !important;
-    opacity: 0 !important;
-    width: 1px !important;
-    height: 1px !important;
-    z-index: -1 !important;
-  }
-`;
-
-if (typeof document !== 'undefined' && !document.querySelector('#xterm-helper-hide-style')) {
-  const style = document.createElement('style');
-  style.id = 'xterm-helper-hide-style';
-  style.textContent = hideHelperTextareaStyle;
-  document.head.appendChild(style);
-}
 
 interface Device {
   id: number;
@@ -51,14 +32,14 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
   const [form] = Form.useForm();
 
   const defaultHost = device?.ip || 'localhost';
-  const defaultUser = device?.os === 'WINDOWS' ? 'Administrator' : 'root';
+  const defaultUser = device?.os?.toUpperCase() === 'WINDOWS' ? 'Administrator' : 'root';
 
   useEffect(() => {
     if (device && open) {
       form.setFieldsValue({
         host: device.ip || 'localhost',
-        user: device.os === 'WINDOWS' ? 'Administrator' : 'root',
-        port: device.os === 'WINDOWS' ? 5985 : 22,
+        user: device.os?.toUpperCase() === 'WINDOWS' ? 'Administrator' : 'root',
+        port: device.os?.toUpperCase() === 'WINDOWS' ? 5985 : 22,
       });
     }
   }, [device, open, form]);
@@ -89,7 +70,7 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
 
       term.onData((data) => {
         if (socketRef.current?.readyState === WebSocket.OPEN && sessionIdRef.current) {
-          const isWindows = device?.os === 'WINDOWS';
+          const isWindows = device?.os?.toUpperCase() === 'WINDOWS';
 
           if (!isWindows) {
             // Linux/SSH: интерактивный PTY — шлём сырые нажатия, эхо приходит от сервера
@@ -231,7 +212,10 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
             rows: term?.rows ?? 24,
           })
         );
-        setTimeout(() => terminalRef.current?.focus(), 200);
+        // AntD Modal (rc-dialog) после анимации открытия сам фокусирует панель
+        // модалки и перебивает наш ранний focus(). Ставим фокус несколько раз,
+        // чтобы выиграть гонку с этим пост-анимационным фокусом.
+        [50, 350, 600].forEach((d) => setTimeout(() => terminalRef.current?.focus(), d));
       };
 
       socket.onmessage = (event) => {
@@ -289,6 +273,11 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
       width="90%"
       footer={null}
       destroyOnClose
+      // Фокус после завершения анимации открытия — когда rc-dialog уже
+      // выполнил свой автофокус на панель модалки и не перебьёт наш.
+      afterOpenChange={(opened) => {
+        if (opened) setTimeout(() => terminalRef.current?.focus(), 50);
+      }}
     >
       <Form
         form={form}
@@ -323,13 +312,19 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
 
       <div
         style={{ background: '#111', marginTop: 12, padding: 8 }}
-        onClick={() => terminalRef.current?.focus()}
+        // preventDefault не даёт браузеру увести фокус на кликнутый span после
+        // mousedown — иначе наш focus() сразу перебивается и клавиатура не ловится.
+        // DOM-рендерер xterm использует собственное выделение, копирование не страдает.
+        onMouseDown={(e) => {
+          e.preventDefault();
+          terminalRef.current?.focus();
+        }}
       >
         <div ref={termRef} style={{ height: '60vh' }} />
       </div>
 
       <Text type="secondary">
-        {device?.os === 'WINDOWS'
+        {device?.os?.toUpperCase() === 'WINDOWS'
           ? 'Команды для WINDOWS отправляются после нажатия Enter.'
           : 'Протокол выбирается автоматически (SSH / WinRM).'}
       </Text>

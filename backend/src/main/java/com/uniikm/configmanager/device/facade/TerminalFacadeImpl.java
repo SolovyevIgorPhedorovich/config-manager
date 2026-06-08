@@ -142,21 +142,15 @@ public class TerminalFacadeImpl implements TerminalFacade {
     }
     
     private ConnectionProtocol determineProtocolFromDevice(DeviceInfo device) {
-        if (device.getOsVersion() != null) {
-            return switch (device.getOsVersion().getName().toUpperCase()) {
-                case "WINDOWS", "WINDOWS_SERVER" -> ConnectionProtocol.WINRM;
-                case "LINUX", "UNIX", "UBUNTU", "DEBIAN", "CENTOS", 
-                     "REDHAT", "MACOS" -> ConnectionProtocol.SSH;
-                case "CISCO", "CISCO_IOS", "CISCO_NXOS" -> ConnectionProtocol.SSH;
-                default -> {
-                    log.warn("Unknown OS type: {}, defaulting to SSH", device.getOsVersion().getName());
-                    yield ConnectionProtocol.SSH;
-                }
-            };
-        }
-        
-        log.warn("No OS type for device: {}, defaulting to SSH", device.getId());
-        return ConnectionProtocol.SSH;
+        // Протокол выводим из типа устройства и ОС, а не из точного совпадения
+        // строки sysDescr. Раньше полный sysDescr (напр. "...Windows Version 10.0...")
+        // не совпадал с "WINDOWS" и Windows-ПК ошибочно подключался по SSH.
+        return switch (device.getType()) {
+            case PC      -> device.isWindows() ? ConnectionProtocol.WINRM : ConnectionProtocol.SSH;
+            case CISCO   -> ConnectionProtocol.SSH;
+            case PROXMOX -> ConnectionProtocol.SSH;
+            case МФУ     -> ConnectionProtocol.SNMP; // у МФУ нет интерактивного shell
+        };
     }
     
     private TerminalWebSocketResponse mapToWebSocketResponse(Map<String, Object> result) {

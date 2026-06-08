@@ -35,6 +35,11 @@ management:
     health:
       show-details: always
       show-components: always
+  health:
+    # Отключаем штатный LDAP-индикатор: он лезет на dc.company.local даже при
+    # выключенном AD и роняет health. Вместо него — DomainHealthIndicator ("domain").
+    ldap:
+      enabled: false
 
 network-scan:
   redis-key-prefix: network-scan

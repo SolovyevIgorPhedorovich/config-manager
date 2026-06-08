@@ -39,6 +39,12 @@ public class AdConfiguration {
             contextSource.setPassword(password);
         }
 
+        // Таймауты, чтобы проверка домена и логин не висели на недоступном DC
+        java.util.Map<String, Object> env = new java.util.HashMap<>();
+        env.put("com.sun.jndi.ldap.connect.timeout", "3000"); // мс на TCP-коннект
+        env.put("com.sun.jndi.ldap.read.timeout", "5000");    // мс на ответ
+        contextSource.setBaseEnvironmentProperties(env);
+
         contextSource.setReferral("follow");
         return contextSource;
     }

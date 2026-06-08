@@ -936,7 +936,7 @@ const handleBulkDelete = async () => {
         },
       ]} />
 
-      <DeviceTerminal open={showSSH} onClose={() => setShowSSH(false)} device={{ id: selectedDevice?.id || 0, hostname: selectedDevice?.hostname || '', ip: selectedDevice?.ips?.[0] || '', os: selectedDevice?.osVersion?.[0] || '' }} />
+      <DeviceTerminal open={showSSH} onClose={() => setShowSSH(false)} device={{ id: selectedDevice?.id || 0, hostname: selectedDevice?.hostname || '', ip: selectedDevice?.ips?.[0] || '', os: selectedDevice?.operatingSystem || '' }} />
       <ScanDeviceModal open={showScan} onCancel={() => setShowScan(false)} onScan={handleScan} scanMode={type || 'all'} />
       <AddDeviceModal open={showAddDevice} onCancel={() => setShowAddDevice(false)} onAdd={handleAddDevice} />
       <ConfigLinuxModal open={linuxModalOpen} onClose={() => setLinuxModalOpen(false)} hostname={selectedDevice?.hostname} deviceId={selectedDevice?.id} />
