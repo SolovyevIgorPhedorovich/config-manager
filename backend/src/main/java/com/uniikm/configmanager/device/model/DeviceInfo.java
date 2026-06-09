@@ -62,6 +62,15 @@ public class DeviceInfo {
     @Column(name = "is_active")
     private Boolean isActive = true;
 
+    /** Признак расхождения фактической конфигурации с сохранённой активной версией. */
+    @Column(name = "config_drift")
+    @Builder.Default
+    private Boolean configDrift = false;
+
+    /** Захваченная версия-факт, отличающаяся от активной (для разрешения конфликта). */
+    @Column(name = "drift_version_id")
+    private Long driftVersionId;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

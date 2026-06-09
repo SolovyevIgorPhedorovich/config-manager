@@ -15,6 +15,9 @@ export interface Device {
   manufacturer?: string;
   model?: string;
   connectionProfile?: ConnectionProfile;
+  // Расхождение фактической конфигурации с сохранённой активной версией
+  configDrift?: boolean;
+  driftVersionId?: number;
 }
 
 export interface ConnectionProfile {

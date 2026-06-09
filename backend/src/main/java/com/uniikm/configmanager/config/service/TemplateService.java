@@ -184,6 +184,7 @@ public class TemplateService {
 
         String batchId = UUID.randomUUID().toString();
         List<String> allGroupTaskIds = new ArrayList<>();
+        List<Long> allScheduledDeviceIds = new ArrayList<>();
 
         for (DeviceInfo device : devices) {
             DeviceCredentials creds = credentials.get(device.getId());
@@ -194,14 +195,16 @@ public class TemplateService {
             }
             JsonNode rendered = renderContent(template.getContent(), device, req.getVariables());
             ApplyConfigResponse r = orchestrationService.applyConfiguration(
-                    List.of(device), rendered, Map.of(device.getId(), creds));
+                    List.of(device), rendered, Map.of(device.getId(), creds), "TEMPLATE");
             allGroupTaskIds.addAll(r.taskGroupIds());
-            log.info("Template '{}' applied to device '{}' (taskGroupIds={})",
-                    template.getName(), device.getHostname(), r.taskGroupIds());
+            allScheduledDeviceIds.addAll(r.scheduledDeviceIds());
+            log.info("Template '{}' applied to device '{}' (taskGroupIds={}, scheduled={})",
+                    template.getName(), device.getHostname(), r.taskGroupIds(), r.scheduledDeviceIds());
         }
 
-        log.info("Template apply batch {} complete: {} task groups", batchId, allGroupTaskIds.size());
-        return new ApplyConfigResponse(batchId, allGroupTaskIds);
+        log.info("Template apply batch {} complete: {} task groups, {} scheduled",
+                batchId, allGroupTaskIds.size(), allScheduledDeviceIds.size());
+        return new ApplyConfigResponse(batchId, allGroupTaskIds, allScheduledDeviceIds);
     }
 
     // ──────────────────────────────────────────────────────────────────────────

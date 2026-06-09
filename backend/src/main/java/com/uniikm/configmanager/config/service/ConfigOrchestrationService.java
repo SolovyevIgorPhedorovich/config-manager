@@ -12,15 +12,17 @@ import com.uniikm.configmanager.config.dto.ApplyConfigResponse;
 import com.uniikm.configmanager.config.dto.DeviceCredentials;
 import com.uniikm.configmanager.config.event.ConfigApplyEvent;
 import com.uniikm.configmanager.config.model.ConfigVersion;
-import com.uniikm.configmanager.device.enums.DeviceType;
 import com.uniikm.configmanager.device.model.DeviceInfo;
 import com.uniikm.configmanager.integration.dto.CommandExecutionRequest;
 import com.uniikm.configmanager.integration.server.RemoteCommandService;
+import com.uniikm.configmanager.integration.service.NetworkProbeService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -47,76 +49,141 @@ public class ConfigOrchestrationService {
     private final RemoteCommandService remoteCommandService;
     private final RedisTemplate<String, Object> redisTemplate;
     private final ApplicationEventPublisher eventPublisher;
+    private final NetworkProbeService probeService;
+
+    // Очередь отложенного применения. @Lazy разрывает циклическую зависимость:
+    // поллер очереди вызывает executeApply() этого сервиса.
+    @Autowired
+    @Lazy
+    private ScheduledConfigApplyService scheduledConfigApplyService;
 
     public ApplyConfigResponse applyConfiguration(List<DeviceInfo> devices, JsonNode newConfig,
                                        Map<Long, DeviceCredentials> credentialsMap) {
-        
+        return applyConfiguration(devices, newConfig, credentialsMap, "CONFIG");
+    }
+
+    public ApplyConfigResponse applyConfiguration(List<DeviceInfo> devices, JsonNode newConfig,
+                                       Map<Long, DeviceCredentials> credentialsMap, String source) {
+
         String batchId = UUID.randomUUID().toString();
         List<String> groupTaskIds = new ArrayList<>();
+        List<Long> scheduledDeviceIds = new ArrayList<>();
         for (DeviceInfo device : devices) {
             DeviceCredentials creds = credentialsMap != null ? credentialsMap.get(device.getId()) : null;
             if (creds == null) {
                 log.warn("Нет учётных данных для устройства {}", device.getId());
                 continue;
             }
-            String groupId = applyToSingleDevice(device, newConfig, creds);
-            if (groupId != null) groupTaskIds.add(groupId);
+            SingleApplyResult result = applyToSingleDevice(device, newConfig, creds, source, batchId);
+            if (result.groupTaskId() != null) groupTaskIds.add(result.groupTaskId());
+            if (result.scheduled()) scheduledDeviceIds.add(device.getId());
         }
         redisTemplate.opsForList().rightPushAll("config:batch" + batchId, groupTaskIds);
         redisTemplate.expire("config:batch" + batchId, Duration.ofHours(1));
-        return new ApplyConfigResponse(batchId, groupTaskIds);
+        return new ApplyConfigResponse(batchId, groupTaskIds, scheduledDeviceIds);
     }
 
-    private String applyToSingleDevice(DeviceInfo device, JsonNode newConfig, DeviceCredentials creds) {
+    /** Результат применения к одному устройству: либо запущено (groupTaskId), либо отложено (scheduled). */
+    private record SingleApplyResult(String groupTaskId, boolean scheduled) {
+        static SingleApplyResult executed(String id) { return new SingleApplyResult(id, false); }
+        static SingleApplyResult deferred()          { return new SingleApplyResult(null, true); }
+        static SingleApplyResult noop()              { return new SingleApplyResult(null, false); }
+    }
+
+    private SingleApplyResult applyToSingleDevice(DeviceInfo device, JsonNode newConfig,
+                                                  DeviceCredentials creds, String source, String batchId) {
         Long deviceId = device.getId();
 
-        // 1. Активная версия
+        // 1. Активная версия + проверка изменений
         Optional<ConfigVersion> activeVersionOpt = deviceConfigService.getActiveVersion(deviceId);
-        // 2. Проверка изменений
         String newChecksum = configVersionService.computeChecksum(newConfig);
         if (activeVersionOpt.isPresent() && activeVersionOpt.get().getChecksum().equals(newChecksum)) {
             log.info("No changes for device {}", deviceId);
-            return null;
+            return SingleApplyResult.noop();
         }
 
-        // 3. Сохраняем новую версию
+        // 2. Сохраняем новую версию
         ConfigVersion newVersion = configVersionService.createNewVersion(newConfig, activeVersionOpt.orElse(null));
 
-        // 4. Генерируем команду в зависимости от типа устройства.
-        //    Для ПК выбор генератора зависит от ОС (Windows/Linux).
+        // 3. Гейт по доступности: офлайн-устройство → в очередь отложенного применения
+        String ip = primaryIp(device);
+        if (!probeService.isReachable(ip)) {
+            scheduledConfigApplyService.enqueue(device, newVersion, creds, source, batchId);
+            log.info("Устройство {} ({}) офлайн — применение версии {} запланировано",
+                    deviceId, ip, newVersion.getId());
+            eventPublisher.publishEvent(new ConfigApplyEvent(
+                "CONFIG_APPLY_SCHEDULED",
+                "CONFIG",
+                newVersion.getId(),
+                null,
+                Map.of("deviceId", deviceId, "reason", "device offline")
+            ));
+            return SingleApplyResult.deferred();
+        }
+
+        // 4. Устройство в сети — запускаем применение немедленно
+        String groupTaskId = executeApply(device, newVersion, creds);
+        return SingleApplyResult.executed(groupTaskId);
+    }
+
+    /**
+     * Явно применяет заданную версию конфигурации (без проверки «нет изменений»):
+     * онлайн — немедленно, офлайн — в очередь отложенного применения.
+     * Используется для повторного применения сохранённой конфигурации при
+     * разрешении расхождения (drift).
+     */
+    public ApplyConfigResponse applyVersion(DeviceInfo device, ConfigVersion version,
+                                            DeviceCredentials creds, String source) {
+        String ip = primaryIp(device);
+        if (!probeService.isReachable(ip)) {
+            scheduledConfigApplyService.enqueue(device, version, creds, source, null);
+            return new ApplyConfigResponse(null, List.of(), List.of(device.getId()));
+        }
+        String groupTaskId = executeApply(device, version, creds);
+        return new ApplyConfigResponse(null, List.of(groupTaskId), List.of());
+    }
+
+    /**
+     * Запускает применение конкретной версии конфигурации к устройству:
+     * генерирует команду, фиксирует статус в Redis и запускает асинхронную задачу.
+     * Используется как при немедленном применении, так и фоновым поллером очереди.
+     */
+    public String executeApply(DeviceInfo device, ConfigVersion version, DeviceCredentials creds) {
+        Long deviceId = device.getId();
+        JsonNode config = version.getConfigData();
+
+        // Генерируем команду в зависимости от типа устройства (для ПК — по ОС).
         String command = switch (device.getType()) {
             case PC      -> device.isWindows()
-                                ? windowsCommandGenerator.generateCommand(newConfig)
-                                : linuxCommandGenerator.generateCommand(newConfig);
-            case CISCO   -> ciscoCommandGenerator.generateCommand(newConfig);
-            case PROXMOX -> proxmoxCommandGenerator.generateCommand(newConfig);
-            case МФУ     -> mfuCommandGenerator.generateCommand(newConfig);
+                                ? windowsCommandGenerator.generateCommand(config)
+                                : linuxCommandGenerator.generateCommand(config);
+            case CISCO   -> ciscoCommandGenerator.generateCommand(config);
+            case PROXMOX -> proxmoxCommandGenerator.generateCommand(config);
+            case МФУ     -> mfuCommandGenerator.generateCommand(config);
         };
 
         DeviceCommandTarget target = buildDeviceCommandTarget(device, creds);
 
-        // 5. Redis: записываем ДО запуска задачи, чтобы избежать race condition
+        // Redis: записываем ДО запуска задачи, чтобы избежать race condition
         String groupTaskId = UUID.randomUUID().toString();
         String redisKey = "config:apply:" + groupTaskId;
         redisTemplate.opsForHash().putAll(redisKey, Map.of(
             "deviceId", deviceId,
-            "configVersionId", newVersion.getId(),
+            "configVersionId", version.getId(),
             "status", "IN_PROGRESS",
             "startedAt", Instant.now().toString()
         ));
         redisTemplate.expire(redisKey, Duration.ofHours(1));
         redisTemplate.opsForValue().set("device:current-task:" + deviceId, groupTaskId, Duration.ofHours(1));
 
-        CommandExecutionRequest execRequest = new CommandExecutionRequest(command, List.of(target), null, groupTaskId);  // 4-arg: command, targets, timeout, groupTaskId
+        CommandExecutionRequest execRequest = new CommandExecutionRequest(command, List.of(target), null, groupTaskId);
 
-        // 6. Асинхронный запуск
         remoteCommandService.executeAsync(execRequest);
 
-        // 7. Аудит: начало применения
         eventPublisher.publishEvent(new ConfigApplyEvent(
             "CONFIG_APPLY_STARTED",
             "CONFIG",
-            newVersion.getId(),
+            version.getId(),
             null,
             Map.of("deviceId", deviceId, "groupTaskId", groupTaskId)
         ));
@@ -124,8 +191,12 @@ public class ConfigOrchestrationService {
         return groupTaskId;
     }
 
+    private String primaryIp(DeviceInfo device) {
+        return device.getIps().isEmpty() ? device.getHostname() : device.getIps().get(0).getIp();
+    }
+
     private DeviceCommandTarget buildDeviceCommandTarget(DeviceInfo device, DeviceCredentials creds) {
-        String ip = device.getIps().isEmpty() ? device.getHostname() : device.getIps().get(0).getIp();
+        String ip = primaryIp(device);
         ConnectionProtocol protocol = switch (device.getType()) {
             case PC  -> device.isWindows() ? ConnectionProtocol.WINRM : ConnectionProtocol.SSH;
             case МФУ -> ConnectionProtocol.SNMP;

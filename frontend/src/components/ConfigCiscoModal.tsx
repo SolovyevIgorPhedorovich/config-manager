@@ -9,6 +9,7 @@ import {
   InfoCircleOutlined, WarningOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import { configApi } from '../api/configApi';
+import ConfigPrefillBar from './ConfigPrefillBar';
 
 const { Text } = Typography;
 
@@ -114,6 +115,17 @@ export default function ConfigCiscoModal({ open, onClose, hostname, deviceId }: 
     updateIface(key, { role: role as InterfaceRow['role'], ...preset });
   };
 
+  // Префилл значений из текущей конфигурации устройства или из шаблона
+  const prefill = (src: Record<string, any>) => {
+    const { interfaces: ifs, vlans: vl, sviInterfaces: sv, staticRoutes: rt, ...scalars } = src;
+    form.setFieldsValue(scalars);
+    if (Array.isArray(ifs))  setInterfaces(ifs.map((i: any) => ({ ...emptyIface(), ...i, _key: uid() })));
+    if (Array.isArray(vl))   setVlans(vl.map((v: any) => ({ _key: uid(), id: 10, name: '', ...v })));
+    if (Array.isArray(sv))   setSvis(sv.map((s: any) => ({ _key: uid(), vlan: 10, ipAddress: '', subnetMask: '255.255.255.0', description: '', ...s })));
+    if (Array.isArray(rt))   setRoutes(rt.map((r: any) => ({ _key: uid(), network: '', mask: '255.255.255.0', nextHop: '', ...r })));
+    if (typeof src.saveToMemory === 'boolean') setSaveToMemory(src.saveToMemory);
+  };
+
   // ── Сабмит ────────────────────────────────────────────────────────────────
 
   const handleSubmit = async () => {
@@ -136,18 +148,22 @@ export default function ConfigCiscoModal({ open, onClose, hostname, deviceId }: 
 
     setSubmitting(true);
     try {
-      await configApi.applyConfig({
+      const res = await configApi.applyConfig({
         deviceIds: [deviceId],
         configData: config,
         credentials: {
           [deviceId]: { username: sshUsername, password: sshPassword, port: sshPort ?? 22 },
         },
       });
-      message.success(
-        saveToMemory
-          ? 'Конфигурация применена и сохранена в NVRAM (write memory)'
-          : 'Конфигурация применена в running-config (без сохранения в NVRAM)'
-      );
+      if (res.data?.scheduledDeviceIds?.length) {
+        message.warning('Устройство офлайн — конфигурация применится автоматически при появлении в сети');
+      } else {
+        message.success(
+          saveToMemory
+            ? 'Конфигурация применена и сохранена в NVRAM (write memory)'
+            : 'Конфигурация применена в running-config (без сохранения в NVRAM)'
+        );
+      }
       onClose();
     } catch (e: any) {
       message.error(e?.response?.data?.message || 'Ошибка применения конфигурации');
@@ -436,6 +452,7 @@ export default function ConfigCiscoModal({ open, onClose, hostname, deviceId }: 
       footer={null}
     >
       <Form form={form} layout="vertical" autoComplete="off">
+        <ConfigPrefillBar open={open} deviceId={deviceId} deviceHostname={hostname} onPrefill={prefill} />
         <Tabs type="card" items={tabItems} />
 
         {/* ── Опция сохранения в NVRAM ───────────────────────────────────── */}

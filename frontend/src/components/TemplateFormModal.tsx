@@ -11,6 +11,9 @@ const { Text } = Typography;
 interface Props {
   open: boolean;
   template?: Template;
+  // Предзаполнение при создании (например, шаблон из конфигурации устройства)
+  initialContent?: Record<string, any>;
+  initialName?: string;
   onSuccess: (t: Template) => void;
   onClose: () => void;
 }
@@ -28,7 +31,7 @@ const DEFAULT_CONTENT = JSON.stringify(
   2,
 );
 
-export default function TemplateFormModal({ open, template, onSuccess, onClose }: Props) {
+export default function TemplateFormModal({ open, template, initialContent, initialName, onSuccess, onClose }: Props) {
   const [form] = Form.useForm();
   const [jsonStr, setJsonStr] = useState(DEFAULT_CONTENT);
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -42,11 +45,17 @@ export default function TemplateFormModal({ open, template, onSuccess, onClose }
         setJsonStr(JSON.stringify(template.content, null, 2));
       } else {
         form.resetFields();
-        setJsonStr(DEFAULT_CONTENT);
+        // Создание из конфигурации устройства — предзаполняем параметризованным JSON
+        if (initialContent) {
+          if (initialName) form.setFieldsValue({ name: initialName });
+          setJsonStr(JSON.stringify(initialContent, null, 2));
+        } else {
+          setJsonStr(DEFAULT_CONTENT);
+        }
       }
       setJsonError(null);
     }
-  }, [open, template]);
+  }, [open, template, initialContent, initialName]);
 
   const validateJson = (value: string): Record<string, any> | null => {
     try {

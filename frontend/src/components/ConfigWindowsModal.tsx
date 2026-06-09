@@ -6,6 +6,7 @@ import {
 import { PlusOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { configApi } from '../api/configApi';
 import SaveToMemoryToggle from './SaveToMemoryToggle';
+import ConfigPrefillBar from './ConfigPrefillBar';
 
 const { Text } = Typography;
 
@@ -41,6 +42,22 @@ export default function ConfigWindowsModal({ open, onClose, hostname, deviceId }
   const joinDomain         = Form.useWatch('joinDomain',         form);
   const setStaticIp        = Form.useWatch('setStaticIp',        form);
 
+  // Префилл значений из текущей конфигурации устройства или из шаблона
+  const prefill = (src: Record<string, any>) => {
+    const { firewallOpenPorts, services: svc, localUsers: lu, auditCategories, createRestorePoint, ...scalars } =
+      src as Record<string, any>;
+    form.setFieldsValue(scalars);
+    if (Array.isArray(firewallOpenPorts))
+      setFwRules(firewallOpenPorts.map((r: any) => ({ _key: uid(), name: '', port: 80, proto: 'TCP', direction: 'Inbound', ...r })));
+    if (Array.isArray(svc))
+      setServices(svc.map((r: any) => ({ _key: uid(), name: '', startType: 'Automatic', state: 'Running', ...r })));
+    if (Array.isArray(lu))
+      setLocalUsers(lu.map((u: any) => ({ _key: uid(), name: '', password: '', admin: false, disabled: false, ...u })));
+    if (Array.isArray(auditCategories))
+      setAuditCats(auditCategories.map((n: any) => ({ _key: uid(), name: String(n) })));
+    if (typeof createRestorePoint === 'boolean') setSaveToMemory(createRestorePoint);
+  };
+
   const handleSubmit = async () => {
     if (!deviceId) return message.error('Устройство не выбрано');
     let fields: Record<string, any>;
@@ -58,12 +75,16 @@ export default function ConfigWindowsModal({ open, onClose, hostname, deviceId }
 
     setSubmitting(true);
     try {
-      await configApi.applyConfig({
+      const res = await configApi.applyConfig({
         deviceIds: [deviceId],
         configData,
         credentials: { [deviceId]: { username: winrmUsername, password: winrmPassword, port: winrmPort ?? 5985 } },
       });
-      message.success('Windows конфигурация применена' + (saveToMemory ? ' (точка восстановления создана)' : ''));
+      if (res.data?.scheduledDeviceIds?.length) {
+        message.warning('Устройство офлайн — конфигурация применится автоматически при появлении в сети');
+      } else {
+        message.success('Windows конфигурация применена' + (saveToMemory ? ' (точка восстановления создана)' : ''));
+      }
       onClose();
     } catch (e: any) {
       message.error(e?.response?.data?.message || 'Ошибка');
@@ -357,6 +378,7 @@ export default function ConfigWindowsModal({ open, onClose, hostname, deviceId }
       open={open} onCancel={onClose} footer={null} width={820} destroyOnClose
     >
       <Form form={form} layout="vertical" autoComplete="off">
+        <ConfigPrefillBar open={open} deviceId={deviceId} deviceHostname={hostname} onPrefill={prefill} />
         <Tabs type="card" items={tabItems} />
 
         <div style={{ marginTop: 16 }}>

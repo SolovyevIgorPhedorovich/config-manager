@@ -27,7 +27,9 @@ public class DeviceMapper {
             entity.getGroup() != null ? entity.getGroup().getName() : "",
             entity.getGroup() != null ? entity.getGroup().getDescription() != null ? entity.getGroup().getDescription() : "" : "",
             entity.getIsActive(),
-            entity.getOsVersion() != null ? entity.getOsVersion().getId() : null
+            entity.getOsVersion() != null ? entity.getOsVersion().getId() : null,
+            entity.getConfigDrift(),
+            entity.getDriftVersionId()
         );
     }
 

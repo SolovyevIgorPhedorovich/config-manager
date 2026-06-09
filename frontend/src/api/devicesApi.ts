@@ -25,6 +25,10 @@ export interface ScanParams {
 export const devicesApi = {
   getAll: () => apiClient.get<Device[]>('/v1/devices'),
 
+  // Фактическая доступность устройств (ping/TCP): { [deviceId]: online }
+  getStatuses: () =>
+    apiClient.get<Record<number, boolean>>('/v1/devices/status').then(r => r.data),
+
   getById: (id: number) => apiClient.get<Device>(`v1/devices/${id}`),
 
   add: (device: Partial<Device>) => apiClient.post<Device>('v1/devices', device),

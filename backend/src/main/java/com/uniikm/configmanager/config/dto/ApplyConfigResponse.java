@@ -4,5 +4,8 @@ import java.util.List;
 
 public record ApplyConfigResponse(
     String batchId,
-    List<String> taskGroupIds
+    List<String> taskGroupIds,
+    // Устройства, для которых применение отложено (были офлайн) и будет выполнено
+    // автоматически при появлении в сети.
+    List<Long> scheduledDeviceIds
 ) {}

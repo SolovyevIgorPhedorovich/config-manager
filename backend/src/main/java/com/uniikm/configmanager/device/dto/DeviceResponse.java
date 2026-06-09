@@ -14,5 +14,7 @@ public record DeviceResponse(
     String groupName,         
     String groupDescription,  
     Boolean isActive,
-    Long osVersionId
+    Long osVersionId,
+    Boolean configDrift,
+    Long driftVersionId
 ) {}

@@ -5,11 +5,12 @@ import dayjs from 'dayjs';
 import { devicesApi } from '../api/devicesApi';
 import { configApi } from '../api/configApi';
 import { eventApi } from '../api/eventApi';
+import ResolveDriftModal from '../components/ResolveDriftModal';
 import type { ConfigVersion, Device, EventLog } from '../types';
 import { eventActionLabel, eventResult, eventResultColor } from '../utils/eventLabels';
 import { getErrorMessage } from '../utils/errorMessage';
 import SSHClient from '../components/DeviceTerminal';
-import { ArrowRightOutlined, CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined } from "@ant-design/icons"
+import { ArrowRightOutlined, CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined, WarningOutlined, ClockCircleOutlined } from "@ant-design/icons"
 import { ScanDeviceModal } from '../components/ScanDeviceModal';
 import { AddDeviceModal } from '../components/AddDeviceModal';
 import { ScanProgress } from '../components/ScanProgress';
@@ -41,7 +42,7 @@ const routeTypeMap: Record<string, keyof typeof deviceTypeInfo> = {
   vm: 'VM',
 };
 
-type DeviceRuntimeStatus = 'online' | 'offline' | 'error';
+type DeviceRuntimeStatus = 'online' | 'offline' | 'error' | 'checking';
 const commandSuggestions = ['show running-config', 'show version', 'ipconfig /all', 'hostname', 'reload'];
 
 const parseConfigLine = (line: string) => {
@@ -97,6 +98,12 @@ export default function DevicesPage({ type }: { type?: string }) {
   // id устройства, для которого идёт инвентаризация
   const [inventoryLoadingId, setInventoryLoadingId] = useState<number | null>(null);
 
+  // Реальная доступность устройств (ping) и счётчики отложенного применения
+  const [statuses, setStatuses] = useState<Record<number, boolean>>({});
+  const [scheduledByDevice, setScheduledByDevice] = useState<Record<number, number>>({});
+  // Устройство, для которого открыта модалка разрешения расхождения (drift)
+  const [driftDevice, setDriftDevice] = useState<Device | null>(null);
+
   // Модалки конфигурации
   const [linuxModalOpen, setLinuxModalOpen] = useState(false);
   const [windowsModalOpen, setWindowsModalOpen] = useState(false);
@@ -107,6 +114,29 @@ export default function DevicesPage({ type }: { type?: string }) {
   useEffect(() => {
     loadDevices();
   }, [type]);
+
+  // Реальный статус (ping) и очередь отложенного применения — с периодическим опросом
+  const loadStatuses = async () => {
+    try {
+      setStatuses(await devicesApi.getStatuses());
+    } catch { /* статус не критичен — оставляем «проверка» */ }
+  };
+  const loadScheduled = async () => {
+    try {
+      const list = await configApi.getScheduled();
+      const counts: Record<number, number> = {};
+      list.forEach((s) => {
+        if (s.status === 'PENDING') counts[s.deviceId] = (counts[s.deviceId] || 0) + 1;
+      });
+      setScheduledByDevice(counts);
+    } catch { /* очередь не критична */ }
+  };
+  useEffect(() => {
+    loadStatuses();
+    loadScheduled();
+    const timer = setInterval(() => { loadStatuses(); loadScheduled(); }, 20000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Загрузка версий конфигурации при выборе устройства
   useEffect(() => {
@@ -317,12 +347,16 @@ const handleBulkDelete = async () => {
 };
 
   const runtimeStatus = (device: Device): DeviceRuntimeStatus => {
-    // Здесь можно вызывать API для проверки статуса, пока заглушка
-    return device.isActive ? 'online' : 'offline';
+    if (device.id == null) return 'checking';
+    const online = statuses[device.id];
+    if (online === undefined) return 'checking'; // статус ещё не загружен
+    return online ? 'online' : 'offline';
   };
 
-  const statusColor = (status: DeviceRuntimeStatus) => (status === 'online' ? 'success' : status === 'offline' ? 'default' : 'error');
-  const statusText = (status: DeviceRuntimeStatus) => (status === 'online' ? 'Онлайн' : status === 'offline' ? 'Оффлайн' : 'Ошибка');
+  const statusColor = (status: DeviceRuntimeStatus) =>
+    status === 'online' ? 'success' : status === 'offline' ? 'default' : status === 'checking' ? 'processing' : 'error';
+  const statusText = (status: DeviceRuntimeStatus) =>
+    status === 'online' ? 'Онлайн' : status === 'offline' ? 'Оффлайн' : status === 'checking' ? 'Проверка…' : 'Ошибка';
 
   // Прогресс применения – получаем из API по deviceId (можно добавить эндпоинт)
   const getActionProgress = (device: Device) => 0; // пока заглушка
@@ -384,7 +418,27 @@ const handleBulkDelete = async () => {
       key: 'status',
       render: (_, record) => {
         const status = runtimeStatus(record);
-        return <Tag color={statusColor(status)}>{statusText(status)}</Tag>;
+        const pending = record.id != null ? scheduledByDevice[record.id] : 0;
+        return (
+          <Space direction="vertical" size={2} align="start">
+            <Tag color={statusColor(status)}>{statusText(status)}</Tag>
+            {pending ? (
+              <Tooltip title="Применение отложено: устройство было офлайн, применится автоматически при появлении в сети">
+                <Tag icon={<ClockCircleOutlined />} color="processing">
+                  Запланировано{pending > 1 ? ` ×${pending}` : ''}
+                </Tag>
+              </Tooltip>
+            ) : null}
+            {record.configDrift ? (
+              <Tooltip title="Фактическая конфигурация разошлась с сохранённой. Нажмите, чтобы разрешить.">
+                <Tag icon={<WarningOutlined />} color="warning" style={{ cursor: 'pointer' }}
+                  onClick={() => setDriftDevice(record)}>
+                  Расхождение
+                </Tag>
+              </Tooltip>
+            ) : null}
+          </Space>
+        );
       },
     },
     {
@@ -945,6 +999,17 @@ const handleBulkDelete = async () => {
       <ConfigWindowsModal open={windowsModalOpen} onClose={() => setWindowsModalOpen(false)} hostname={selectedDevice?.hostname} deviceId={selectedDevice?.id} />
       <ConfigMFUModal open={mfuModalOpen} onClose={() => setMfuModalOpen(false)} hostname={selectedDevice?.hostname} deviceId={selectedDevice?.id} />
       <ConfigCiscoModal open={ciscoModalOpen} onClose={() => setCiscoModalOpen(false)} hostname={selectedDevice?.hostname} deviceId={selectedDevice?.id} />
+      <ResolveDriftModal
+        open={!!driftDevice}
+        device={driftDevice ? {
+          id: driftDevice.id!,
+          hostname: driftDevice.hostname,
+          operatingSystem: driftDevice.operatingSystem,
+          typeCode: driftDevice.typeCode,
+        } : null}
+        onClose={() => setDriftDevice(null)}
+        onResolved={() => { loadDevices(); loadStatuses(); loadScheduled(); }}
+      />
     </>
   );
 }

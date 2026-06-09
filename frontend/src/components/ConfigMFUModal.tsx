@@ -6,6 +6,7 @@ import {
 import { ThunderboltOutlined } from '@ant-design/icons';
 import { configApi } from '../api/configApi';
 import SaveToMemoryToggle from './SaveToMemoryToggle';
+import ConfigPrefillBar from './ConfigPrefillBar';
 
 const { Text } = Typography;
 
@@ -32,6 +33,13 @@ export default function ConfigMFUModal({ open, onClose, hostname, deviceId }: Pr
   const scanToFolder = Form.useWatch('scanToFolder', form);
   const scanToEmail  = Form.useWatch('scanToEmail',  form);
 
+  // Префилл значений из текущей конфигурации устройства или из шаблона
+  const prefill = (src: Record<string, any>) => {
+    const { saveToMemory: stm, ...scalars } = src as Record<string, any>;
+    form.setFieldsValue(scalars);
+    if (typeof stm === 'boolean') setSaveToMemory(stm);
+  };
+
   const handleSubmit = async () => {
     if (!deviceId) return message.error('Устройство не выбрано');
     let fields: Record<string, any>;
@@ -41,16 +49,20 @@ export default function ConfigMFUModal({ open, onClose, hostname, deviceId }: Pr
 
     setSubmitting(true);
     try {
-      await configApi.applyConfig({
+      const res = await configApi.applyConfig({
         deviceIds:   [deviceId],
         configData,
         credentials: {},   // МФУ конфигурируется через SNMP SET с management-сервера
       });
-      message.success(
-        saveToMemory
-          ? 'SNMP-конфигурация отправлена. Настройки будут сохранены в NVRAM МФУ.'
-          : 'SNMP-конфигурация отправлена (только в RAM, сбросится при выключении).'
-      );
+      if (res.data?.scheduledDeviceIds?.length) {
+        message.warning('Устройство офлайн — конфигурация применится автоматически при появлении в сети');
+      } else {
+        message.success(
+          saveToMemory
+            ? 'SNMP-конфигурация отправлена. Настройки будут сохранены в NVRAM МФУ.'
+            : 'SNMP-конфигурация отправлена (только в RAM, сбросится при выключении).'
+        );
+      }
       onClose();
     } catch (e: any) {
       message.error(e?.response?.data?.message || 'Ошибка');
@@ -273,6 +285,7 @@ export default function ConfigMFUModal({ open, onClose, hostname, deviceId }: Pr
       />
 
       <Form form={form} layout="vertical" autoComplete="off">
+        <ConfigPrefillBar open={open} deviceId={deviceId} deviceHostname={hostname} onPrefill={prefill} />
         <Tabs type="card" items={tabItems} />
 
         <div style={{ marginTop: 16 }}>

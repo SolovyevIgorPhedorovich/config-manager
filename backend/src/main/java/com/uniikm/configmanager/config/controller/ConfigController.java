@@ -14,9 +14,16 @@ import com.uniikm.configmanager.config.dto.ApplyConfigResponse;
 import com.uniikm.configmanager.config.dto.ConfigCompareRequest;
 import com.uniikm.configmanager.config.dto.ConfigCompareResponse;
 import com.uniikm.configmanager.config.dto.ConfigHistoryResponse;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.uniikm.configmanager.config.dto.ApplyConfigResponse;
 import com.uniikm.configmanager.config.dto.ConfigStatusResponse;
+import com.uniikm.configmanager.config.dto.DriftComparisonResponse;
+import com.uniikm.configmanager.config.dto.ResolveDriftRequest;
+import com.uniikm.configmanager.config.dto.ScheduledApplyResponse;
 import com.uniikm.configmanager.config.dto.TemplateAssignmentResponse;
 import com.uniikm.configmanager.config.facade.ConfigFacade;
+import com.uniikm.configmanager.config.service.DeviceConfigQueryService;
+import com.uniikm.configmanager.config.service.ScheduledConfigApplyService;
 import com.uniikm.configmanager.config.service.TemplateService;
 
 
@@ -27,6 +34,8 @@ public class ConfigController {
 
     private final ConfigFacade configFacade;
     private final TemplateService templateService;
+    private final ScheduledConfigApplyService scheduledConfigApplyService;
+    private final DeviceConfigQueryService deviceConfigQueryService;
 
     @PostMapping("/devices/configure")
     public ResponseEntity<ApplyConfigResponse> configureDevices(@Validated @RequestBody ApplyConfigRequest request) {
@@ -54,5 +63,55 @@ public class ConfigController {
     @GetMapping("/devices/{deviceId}/templates")
     public ResponseEntity<List<TemplateAssignmentResponse>> getDeviceTemplates(@PathVariable Long deviceId) {
         return ResponseEntity.ok(templateService.getDeviceAssignments(deviceId));
+    }
+
+    // ── Очередь отложенного применения (устройство было офлайн) ────────────────
+
+    /** Все ожидающие применения (устройства офлайн). */
+    @GetMapping("/config/scheduled")
+    public ResponseEntity<List<ScheduledApplyResponse>> getScheduled() {
+        return ResponseEntity.ok(scheduledConfigApplyService.listPending());
+    }
+
+    /** Ожидающие применения для конкретного устройства. */
+    @GetMapping("/devices/{deviceId}/config/scheduled")
+    public ResponseEntity<List<ScheduledApplyResponse>> getDeviceScheduled(@PathVariable Long deviceId) {
+        return ResponseEntity.ok(scheduledConfigApplyService.listByDevice(deviceId));
+    }
+
+    /** Отменить отложенное применение. */
+    @DeleteMapping("/config/scheduled/{id}")
+    public ResponseEntity<Void> cancelScheduled(@PathVariable Long id) {
+        scheduledConfigApplyService.cancel(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ── Конфигурация устройства: активная версия, drift, шаблон ────────────────
+
+    /** Активная (текущая) конфигурация устройства — для предзаполнения редактора. */
+    @GetMapping("/devices/{deviceId}/config/active")
+    public ResponseEntity<JsonNode> getActiveConfig(@PathVariable Long deviceId) {
+        JsonNode config = deviceConfigQueryService.getActiveConfig(deviceId);
+        return config != null ? ResponseEntity.ok(config) : ResponseEntity.noContent().build();
+    }
+
+    /** Активная конфигурация в виде параметризованного шаблона (уникальные поля → переменные). */
+    @GetMapping("/devices/{deviceId}/config/as-template")
+    public ResponseEntity<JsonNode> getConfigAsTemplate(@PathVariable Long deviceId) {
+        return ResponseEntity.ok(deviceConfigQueryService.getConfigAsTemplate(deviceId));
+    }
+
+    /** Сравнение сохранённой и фактической конфигураций (для разрешения расхождения). */
+    @GetMapping("/devices/{deviceId}/config/drift")
+    public ResponseEntity<DriftComparisonResponse> getDriftComparison(@PathVariable Long deviceId) {
+        return ResponseEntity.ok(deviceConfigQueryService.getDriftComparison(deviceId));
+    }
+
+    /** Разрешить расхождение конфигурации (drift). */
+    @PostMapping("/devices/{deviceId}/config/resolve-drift")
+    public ResponseEntity<ApplyConfigResponse> resolveDrift(
+            @PathVariable Long deviceId,
+            @RequestBody ResolveDriftRequest request) {
+        return ResponseEntity.ok(deviceConfigQueryService.resolveDrift(deviceId, request));
     }
 }

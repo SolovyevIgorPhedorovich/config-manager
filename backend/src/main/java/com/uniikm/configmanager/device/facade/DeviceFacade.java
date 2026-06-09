@@ -1,6 +1,7 @@
 package com.uniikm.configmanager.device.facade;
 
 import java.util.List;
+import java.util.Map;
 
 import com.uniikm.configmanager.device.dto.BulkDeleteResponse;
 import com.uniikm.configmanager.device.dto.DeviceRequest;
@@ -24,5 +25,8 @@ public interface DeviceFacade {
     public BulkDeleteResponse bulkDelete(List<Long> ids);
 
     void delete(Long id);
+
+    /** Фактическая доступность устройств в сети (ping/TCP): id устройства → online. */
+    Map<Long, Boolean> getReachability();
 
 }

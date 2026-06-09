@@ -6,6 +6,7 @@ import {
 import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { configApi } from '../api/configApi';
 import SaveToMemoryToggle from './SaveToMemoryToggle';
+import ConfigPrefillBar from './ConfigPrefillBar';
 
 const { Text } = Typography;
 
@@ -53,18 +54,42 @@ export default function ConfigLinuxModal({ open, onClose, hostname, deviceId }: 
 
     setSubmitting(true);
     try {
-      await configApi.applyConfig({
+      const res = await configApi.applyConfig({
         deviceIds: [deviceId],
         configData,
         credentials: { [deviceId]: { username: sshUsername, password: sshPassword, port: sshPort ?? 22 } },
       });
-      message.success(saveToMemory ? 'Конфигурация применена и сохранена' : 'Конфигурация применена (только текущий сеанс)');
+      if (res.data?.scheduledDeviceIds?.length) {
+        message.warning('Устройство офлайн — конфигурация применится автоматически при появлении в сети');
+      } else {
+        message.success(saveToMemory ? 'Конфигурация применена и сохранена' : 'Конфигурация применена (только текущий сеанс)');
+      }
       onClose();
     } catch (e: any) {
       message.error(e?.response?.data?.message || 'Ошибка применения конфигурации');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Префилл значений из текущей конфигурации устройства или из шаблона
+  const prefill = (src: Record<string, any>) => {
+    const { networkInterfaces, sysctlParams, services: svc, users: us, cronJobs, firewallOpenPorts,
+            saveToMemory: stm, ...scalars } = src as Record<string, any>;
+    form.setFieldsValue(scalars);
+    if (Array.isArray(networkInterfaces))
+      setIfaces(networkInterfaces.map((r: any) => ({ _key: uid(), name: 'eth0', address: '', prefix: '24', gateway: '', ...r })));
+    if (Array.isArray(sysctlParams))
+      setSysctls(sysctlParams.map((r: any) => ({ _key: uid(), key: '', value: '', ...r })));
+    if (Array.isArray(svc))
+      setServices(svc.map((r: any) => ({ _key: uid(), name: '', enabled: false, running: false, ...r })));
+    if (Array.isArray(us))
+      setUsers(us.map((u: any) => ({ _key: uid(), name: '', password: '', sudo: false, locked: false, create: true, ...u })));
+    if (Array.isArray(cronJobs))
+      setCrons(cronJobs.map((c: any) => ({ _key: uid(), schedule: '', command: '', user: 'root', ...c })));
+    if (Array.isArray(firewallOpenPorts))
+      setFwPorts(firewallOpenPorts.map((p: any) => ({ _key: uid(), port: 80, proto: 'tcp', ...p })));
+    if (typeof stm === 'boolean') setSaveToMemory(stm);
   };
 
   const tabItems = [
@@ -362,6 +387,7 @@ export default function ConfigLinuxModal({ open, onClose, hostname, deviceId }: 
       open={open} onCancel={onClose} footer={null} width={800} destroyOnClose
     >
       <Form form={form} layout="vertical" autoComplete="off">
+        <ConfigPrefillBar open={open} deviceId={deviceId} deviceHostname={hostname} onPrefill={prefill} />
         <Tabs type="card" items={tabItems} />
 
         <div style={{ marginTop: 16 }}>

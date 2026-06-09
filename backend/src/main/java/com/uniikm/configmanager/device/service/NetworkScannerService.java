@@ -10,6 +10,7 @@ import com.uniikm.configmanager.device.model.DeviceGroup;
 import com.uniikm.configmanager.device.model.DeviceIP;
 import com.uniikm.configmanager.device.model.DeviceInfo;
 import com.uniikm.configmanager.device.model.DeviceOS;
+import com.uniikm.configmanager.config.service.DeviceConfigCaptureService;
 import com.uniikm.configmanager.device.repository.DeviceGroupRepository;
 import com.uniikm.configmanager.device.repository.DeviceOSRepository;
 import com.uniikm.configmanager.device.repository.DeviceRepository;
@@ -47,6 +48,7 @@ public class NetworkScannerService {
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
     private final NetworkProbeService networkProbeService;
+    private final DeviceConfigCaptureService configCaptureService;
     private final Executor taskExecutor;
 
     @Value("${network-scan.redis-key-prefix:network-scan}")
@@ -71,6 +73,7 @@ public class NetworkScannerService {
                                  ObjectMapper objectMapper,
                                  StringRedisTemplate redisTemplate,
                                  NetworkProbeService networkProbeService,
+                                 DeviceConfigCaptureService configCaptureService,
                                  @Qualifier("taskExecutor") Executor taskExecutor) {
         this.deviceRepo = deviceRepo;
         this.deviceGroupRepo = deviceGroupRepo;
@@ -79,6 +82,7 @@ public class NetworkScannerService {
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
         this.networkProbeService = networkProbeService;
+        this.configCaptureService = configCaptureService;
         this.taskExecutor = taskExecutor;
     }
 
@@ -191,6 +195,9 @@ public class NetworkScannerService {
         boolean changed = updateDeviceFromProbe(device, probe);
         if (changed) deviceRepo.save(device);
 
+        // Сверяем фактическое состояние с сохранённой конфигурацией (drift)
+        safeCapture(device.getId(), probe);
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("success", true);
         result.put("updated", changed);
@@ -273,12 +280,16 @@ public class NetworkScannerService {
                         DeviceInfo device = existing.get();
                         boolean changed = updateDeviceFromProbe(device, probe);
                         if (changed) deviceRepo.save(device);
-                        DeviceResponse response = deviceMapper.toResponse(device);
+                        // Сверяем фактическое состояние с сохранённой конфигурацией (drift)
+                        safeCapture(device.getId(), probe);
+                        DeviceResponse response = deviceMapper.toResponse(deviceRepo.findById(device.getId()).orElse(device));
                         log.info("Хост {}: {} (id={})", probe.ip(), changed ? "ОБНОВЛЁН" : "БЕЗ ИЗМЕНЕНИЙ", device.getId());
                         results.add(new ScanResultEntry(response, changed ? "UPDATED" : "EXISTING"));
                     } else {
                         DeviceInfo newDevice = createDeviceFromProbe(probe, typeCode);
                         DeviceInfo saved = deviceRepo.save(newDevice);
+                        // Захватываем базовую конфигурацию нового устройства
+                        safeCapture(saved.getId(), probe);
                         DeviceResponse response = deviceMapper.toResponse(saved);
                         log.info("Хост {}: ДОБАВЛЕН как новый (id={})", probe.ip(), saved.getId());
                         results.add(new ScanResultEntry(response, "NEW"));
@@ -335,6 +346,15 @@ public class NetworkScannerService {
     }
 
     // ── Domain: создание/обновление сущностей ─────────────────────────────────
+
+    /** Захват/сверка конфигурации; сбой захвата не должен ломать сканирование. */
+    private void safeCapture(Long deviceId, DeviceProbeResult probe) {
+        try {
+            configCaptureService.captureAndReconcile(deviceId, probe);
+        } catch (Exception e) {
+            log.warn("Захват конфигурации устройства {} не удался: {}", deviceId, e.getMessage());
+        }
+    }
 
     private boolean updateDeviceFromProbe(DeviceInfo device, DeviceProbeResult probe) {
         boolean changed = false;

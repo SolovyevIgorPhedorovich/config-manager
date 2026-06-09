@@ -1,16 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Table, Button, Input, Space, Tag, Popconfirm, Tabs, Typography,
-  Empty, Tooltip, Badge, message, Descriptions, Card,
+  Empty, Tooltip, Badge, message, Descriptions, Card, Modal, Select,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, LinkOutlined,
   ThunderboltOutlined, DisconnectOutlined, SearchOutlined,
-  FileTextOutlined, CalendarOutlined,
+  FileTextOutlined, CalendarOutlined, ImportOutlined,
 } from '@ant-design/icons';
 
 import { templatesApi, Template, TemplateAssignment } from '../api/templatesApi';
+import { devicesApi } from '../api/devicesApi';
+import { configApi } from '../api/configApi';
+import type { Device } from '../types';
 import TemplateFormModal from '../components/TemplateFormModal';
 import TemplateAssignModal from '../components/TemplateAssignModal';
 import TemplateApplyModal from '../components/TemplateApplyModal';
@@ -31,6 +34,14 @@ export default function TemplatesPage() {
   const [editingTemplate, setEditingTemplate] = useState<Template | undefined>();
   const [assignOpen, setAssignOpen] = useState(false);
   const [applyOpen, setApplyOpen] = useState(false);
+
+  // «Создать из устройства»: параметризованный черновик из конфигурации устройства
+  const [draftContent, setDraftContent] = useState<Record<string, any> | undefined>();
+  const [draftName, setDraftName] = useState<string | undefined>();
+  const [fromDeviceOpen, setFromDeviceOpen] = useState(false);
+  const [deviceOptions, setDeviceOptions] = useState<Device[]>([]);
+  const [pickedDeviceId, setPickedDeviceId] = useState<number>();
+  const [fromDeviceLoading, setFromDeviceLoading] = useState(false);
 
   // ── Data loading ──────────────────────────────────────────────────────────
 
@@ -62,7 +73,42 @@ export default function TemplatesPage() {
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
-  const handleCreate = () => { setEditingTemplate(undefined); setFormOpen(true); };
+  const handleCreate = () => {
+    setEditingTemplate(undefined);
+    setDraftContent(undefined);
+    setDraftName(undefined);
+    setFormOpen(true);
+  };
+
+  // ── Создание шаблона из конфигурации устройства ──────────────────────────────
+  const openFromDevice = async () => {
+    setPickedDeviceId(undefined);
+    setFromDeviceOpen(true);
+    try {
+      const res = await devicesApi.getAll();
+      setDeviceOptions(res.data);
+    } catch {
+      message.error('Не удалось загрузить устройства');
+    }
+  };
+
+  const confirmFromDevice = async () => {
+    if (!pickedDeviceId) { message.warning('Выберите устройство'); return; }
+    setFromDeviceLoading(true);
+    try {
+      const content = await configApi.getConfigAsTemplate(pickedDeviceId);
+      const device = deviceOptions.find(d => d.id === pickedDeviceId);
+      setDraftContent(content);
+      setDraftName(device ? `${device.hostname}-baseline` : undefined);
+      setEditingTemplate(undefined);
+      setFromDeviceOpen(false);
+      setFormOpen(true);
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || 'У устройства нет сохранённой конфигурации');
+    } finally {
+      setFromDeviceLoading(false);
+    }
+  };
 
   const handleEdit = (t: Template) => { setEditingTemplate(t); setFormOpen(true); };
 
@@ -85,6 +131,8 @@ export default function TemplatesPage() {
       setTemplates(prev => [saved, ...prev]);
     }
     setFormOpen(false);
+    setDraftContent(undefined);
+    setDraftName(undefined);
     message.success(editingTemplate ? 'Шаблон обновлён' : 'Шаблон создан');
   };
 
@@ -273,9 +321,14 @@ export default function TemplatesPage() {
               allowClear
               style={{ width: 340 }}
             />
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-              Создать шаблон
-            </Button>
+            <Space>
+              <Button icon={<ImportOutlined />} onClick={openFromDevice}>
+                Создать из устройства
+              </Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+                Создать шаблон
+              </Button>
+            </Space>
           </Space>
 
           <Table
@@ -383,9 +436,39 @@ export default function TemplatesPage() {
       <TemplateFormModal
         open={formOpen}
         template={editingTemplate}
+        initialContent={draftContent}
+        initialName={draftName}
         onSuccess={handleFormSuccess}
         onClose={() => setFormOpen(false)}
       />
+
+      <Modal
+        title="Создать шаблон из конфигурации устройства"
+        open={fromDeviceOpen}
+        onCancel={() => setFromDeviceOpen(false)}
+        onOk={confirmFromDevice}
+        okText="Далее"
+        confirmLoading={fromDeviceLoading}
+        okButtonProps={{ icon: <ImportOutlined /> }}
+      >
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+          Берётся активная конфигурация устройства; уникальные в сети поля (hostname, IP, шлюз)
+          заменяются на переменные ({'{{'}device.hostname{'}}'}, {'{{'}device.ip{'}}'}). Черновик можно
+          отредактировать перед сохранением.
+        </Text>
+        <Select
+          showSearch
+          placeholder="Выберите устройство"
+          style={{ width: '100%' }}
+          value={pickedDeviceId}
+          onChange={setPickedDeviceId}
+          optionFilterProp="label"
+          options={deviceOptions.map(d => ({
+            value: d.id as number,
+            label: `${d.hostname}${d.ips?.[0] ? ` (${d.ips[0]})` : ''}`,
+          }))}
+        />
+      </Modal>
 
       <TemplateAssignModal
         open={assignOpen}

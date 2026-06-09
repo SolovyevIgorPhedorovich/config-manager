@@ -249,3 +249,35 @@ CREATE TABLE IF NOT EXISTS ad_settings (
     user_search_filter VARCHAR(256) NOT NULL DEFAULT '(sAMAccountName={0})',
     updated_at         TIMESTAMP
 );
+
+-- ============================================================
+-- Отложенное применение конфигурации (устройство было офлайн)
+-- Фоновый планировщик применяет PENDING-заявки, когда устройство
+-- появляется в сети. Учётные данные хранятся зашифрованно (enc:...).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS scheduled_config_apply (
+    id                BIGSERIAL PRIMARY KEY,
+    device_id         BIGINT      NOT NULL REFERENCES device_info(id)     ON DELETE CASCADE,
+    config_version_id BIGINT      NOT NULL REFERENCES config_versions(id) ON DELETE CASCADE,
+    username          VARCHAR(255),
+    enc_password      VARCHAR(512),
+    enc_community     VARCHAR(512),
+    port              INTEGER,
+    status            VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    source            VARCHAR(20),
+    batch_id          VARCHAR(64),
+    attempts          INTEGER     NOT NULL DEFAULT 0,
+    last_error        TEXT,
+    created_at        TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+    applied_at        TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_sca_status ON scheduled_config_apply(status);
+CREATE INDEX IF NOT EXISTS idx_sca_device ON scheduled_config_apply(device_id);
+
+-- ============================================================
+-- Детект расхождений конфигурации (drift): признак того, что фактический
+-- конфиг устройства при сканировании разошёлся с сохранённой активной версией.
+-- drift_version_id указывает на захваченную (неактивную) версию-факт.
+-- ============================================================
+ALTER TABLE device_info ADD COLUMN IF NOT EXISTS config_drift     BOOLEAN DEFAULT FALSE;
+ALTER TABLE device_info ADD COLUMN IF NOT EXISTS drift_version_id BIGINT REFERENCES config_versions(id) ON DELETE SET NULL;

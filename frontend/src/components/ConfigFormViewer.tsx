@@ -224,12 +224,16 @@ export default function ConfigFormViewer({
     setSubmitting(true);
     try {
       const merged = applyEdits(config, edits);
-      await configApi.applyConfig({
+      const res = await configApi.applyConfig({
         deviceIds: [deviceId],
         configData: merged,
         credentials,
       });
-      message.success(`Изменения отправлены на устройство ${hostname ?? deviceId}`);
+      if (res.data?.scheduledDeviceIds?.length) {
+        message.warning(`Устройство ${hostname ?? deviceId} офлайн — изменения применятся автоматически при появлении в сети`);
+      } else {
+        message.success(`Изменения отправлены на устройство ${hostname ?? deviceId}`);
+      }
       setEdits({});
       setCredOpen(false);
       onApplied?.();

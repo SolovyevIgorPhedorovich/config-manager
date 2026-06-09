@@ -99,6 +99,11 @@ public class NetworkProbeService {
         return pingTimeoutMs;
     }
 
+    /** Публичная проверка доступности хоста: системный ICMP-ping + TCP-фолбэк. */
+    public boolean isReachable(String ip) {
+        return isHostReachable(ip);
+    }
+
     /**
      * Опрашивает хост всеми доступными методами: SNMP → WinRM → SSH → PORT.
      * Возвращает null если хост недоступен или не отвечает ни по одному протоколу.

@@ -11,6 +11,7 @@ import com.uniikm.configmanager.device.dto.DeviceResponse;
 import com.uniikm.configmanager.device.facade.DeviceFacade;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/devices")
@@ -22,6 +23,12 @@ public class DeviceController {
     @GetMapping
     public List<DeviceResponse> getAll() {
         return deviceFacade.getAll();
+    }
+
+    /** Фактическая доступность устройств в сети (ping/TCP): id устройства → online. */
+    @GetMapping("/status")
+    public Map<Long, Boolean> status() {
+        return deviceFacade.getReachability();
     }
 
     @PostMapping
