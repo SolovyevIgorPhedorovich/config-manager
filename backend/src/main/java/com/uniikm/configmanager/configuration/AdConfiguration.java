@@ -45,7 +45,10 @@ public class AdConfiguration {
         env.put("com.sun.jndi.ldap.read.timeout", "5000");    // мс на ответ
         contextSource.setBaseEnvironmentProperties(env);
 
-        contextSource.setReferral("follow");
+        // ignore (а не follow): AD при поиске от корня домена возвращает
+        // referral'ы на DNS-имя домена (test.ru), которое может не резолвиться
+        // с хоста приложения и роняет поиск UnknownHostException.
+        contextSource.setReferral("ignore");
         return contextSource;
     }
 }

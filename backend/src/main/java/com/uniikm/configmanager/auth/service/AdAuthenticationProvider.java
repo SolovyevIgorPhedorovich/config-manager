@@ -11,6 +11,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -18,7 +19,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
-import java.util.Collections;
+import com.uniikm.configmanager.auth.utils.CustomUserDetails;
+
+import java.util.List;
 
 @Component
 @Data
@@ -41,6 +44,9 @@ public class AdAuthenticationProvider implements AuthenticationProvider {
 
     public AdAuthenticationProvider(LdapContextSource contextSource, UserDetailsService userDetailsService) {
         this.ldapTemplate = new LdapTemplate(contextSource);
+        // AD при поиске от корня домена возвращает continuation references;
+        // игнорируем PartialResultException, иначе поиск пользователя падает.
+        this.ldapTemplate.setIgnorePartialResultException(true);
         this.userDetailsService = userDetailsService;
     }
 
@@ -81,19 +87,27 @@ public class AdAuthenticationProvider implements AuthenticationProvider {
 
     private Authentication authenticateUsingAd(String username, String password) {
         try {
+            // base НЕ указываем: LdapContextSource уже настроен на baseDn,
+            // поиск идёт относительно него (иначе base удваивается -> NO_OBJECT).
             LdapQuery query = LdapQueryBuilder.query()
-                .base(baseDn)
                 .filter(userSearchFilter.replace("{0}", username));
 
+            // Домен подтверждает пароль (bind под учёткой пользователя)
             ldapTemplate.authenticate(query, password);
 
-            UserDetails adUser = new org.springframework.security.core.userdetails.User(
-                username,
-                password,
-                Collections.emptyList()
-            );
+            // Роли и идентификатор берём из локальной учётной записи, если она
+            // заведена в БД; иначе доменному пользователю выдаём роль по умолчанию.
+            // Principal — CustomUserDetails (его ожидает JwtService при выпуске токена).
+            CustomUserDetails principal;
+            try {
+                principal = (CustomUserDetails) userDetailsService.loadUserByUsername(username);
+            } catch (UsernameNotFoundException notFound) {
+                principal = new CustomUserDetails(
+                    null, username, List.of(new SimpleGrantedAuthority("ROLE_VIEWER")));
+            }
 
-            return new UsernamePasswordAuthenticationToken(adUser, password, adUser.getAuthorities());
+            return new UsernamePasswordAuthenticationToken(
+                principal, password, principal.getAuthorities());
         } catch (org.springframework.ldap.AuthenticationException ex) {
             throw new BadCredentialsException("AD Authentication failed");
         }

@@ -2,6 +2,7 @@ package com.uniikm.configmanager.auth.utils;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -20,7 +21,27 @@ public class CustomUserDetails implements UserDetails {
         this.id = user.getId();
         this.username = user.getUsername();
         this.password = user.getPassword();
-        this.authorities = List.of(new SimpleGrantedAuthority("ROLE_ADMIN"));
+        // Authorities из реальных ролей пользователя (раньше был хардкод ROLE_ADMIN,
+        // из-за чего ЛЮБОЙ пользователь получал полный доступ). Нормализуем префикс
+        // ROLE_, чтобы hasRole("ADMIN") совпадал независимо от формата имени в БД.
+        this.authorities = (user.getRoles() == null) ? List.of()
+                : user.getRoles().stream()
+                    .map(r -> r.getName().startsWith("ROLE_") ? r.getName() : "ROLE_" + r.getName())
+                    .distinct()
+                    .map(SimpleGrantedAuthority::new)
+                    .collect(Collectors.toList());
+    }
+
+    /**
+     * Конструктор для внешних (доменных, AD) пользователей: пароль в системе
+     * не хранится (проверяется доменом), роли передаются явно.
+     */
+    public CustomUserDetails(Long id, String username,
+                             Collection<? extends GrantedAuthority> authorities) {
+        this.id = id;
+        this.username = username;
+        this.password = null;
+        this.authorities = (authorities == null) ? List.of() : authorities;
     }
 
     public Long getId() {
