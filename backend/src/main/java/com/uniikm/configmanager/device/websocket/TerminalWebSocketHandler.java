@@ -1,18 +1,24 @@
 package com.uniikm.configmanager.device.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.uniikm.configmanager.auth.utils.CustomUserDetails;
 import com.uniikm.configmanager.device.dto.terminal.TerminalWebSocketMessage;
 import com.uniikm.configmanager.device.facade.TerminalFacade;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -39,6 +45,18 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void handleTextMessage(WebSocketSession session, TextMessage message) {
+        // Путь /ws/** в http-цепочке permitAll, поэтому SecurityContext в потоке
+        // обработки сообщений пуст. Восстанавливаем пользователя из атрибутов
+        // рукопожатия, чтобы аудит действий терминала знал, кто их выполнил.
+        applySecurityContext(session);
+        try {
+            doHandleTextMessage(session, message);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    private void doHandleTextMessage(WebSocketSession session, TextMessage message) {
         TerminalWebSocketMessage msg;
         try {
             msg = objectMapper.readValue(message.getPayload(), TerminalWebSocketMessage.class);
@@ -59,6 +77,17 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
         bindOutput(session, sessionId);
 
         String type = msg.type() == null ? "input" : msg.type();
+
+        // Логируем приём данных. DEBUG — метаданные, TRACE — содержимое.
+        if (log.isDebugEnabled()) {
+            int inLen = msg.input() != null ? msg.input().length() : 0;
+            log.debug("WS<- ws={} term={} type={} inLen={} cols={} rows={}",
+                    session.getId(), sessionId, type, inLen, msg.cols(), msg.rows());
+            if (log.isTraceEnabled() && msg.input() != null && !msg.input().isEmpty()) {
+                log.trace("WS<- ws={} input='{}'", session.getId(), preview(msg.input(), 200));
+            }
+        }
+
         try {
             switch (type) {
                 case "init" -> {
@@ -117,12 +146,53 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
         try {
             if (!session.isOpen()) return;
             String json = objectMapper.writeValueAsString(payload);
+            // Логируем отправку данных. DEBUG — размер, TRACE — содержимое.
+            if (log.isDebugEnabled()) {
+                log.debug("WS-> ws={} bytes={}", session.getId(), json.length());
+                if (log.isTraceEnabled()) {
+                    log.trace("WS-> ws={} data='{}'", session.getId(), preview(json, 200));
+                }
+            }
             synchronized (session) {
                 session.sendMessage(new TextMessage(json));
             }
         } catch (Exception e) {
             log.debug("Error sending WebSocket message for session {}: {}", session.getId(), e.getMessage());
         }
+    }
+
+    /**
+     * Восстанавливает SecurityContext текущего потока из атрибутов рукопожатия
+     * (username/userId/roles положил JwtHandshakeInterceptor). Principal —
+     * CustomUserDetails, чтобы SecurityFacade.currentUserId() в аудите вернул id.
+     */
+    @SuppressWarnings("unchecked")
+    private void applySecurityContext(WebSocketSession session) {
+        Map<String, Object> attrs = session.getAttributes();
+        Object username = attrs.get("username");
+        if (username == null) {
+            return;
+        }
+        Object userIdObj = attrs.get("userId");
+        Long userId = (userIdObj instanceof Number n) ? n.longValue() : null;
+        List<String> roles = (List<String>) attrs.getOrDefault("roles", List.of());
+        List<SimpleGrantedAuthority> authorities = roles.stream()
+                .map(r -> r.startsWith("ROLE_") ? r : "ROLE_" + r)
+                .map(SimpleGrantedAuthority::new)
+                .collect(Collectors.toList());
+        CustomUserDetails principal = new CustomUserDetails(userId, username.toString(), authorities);
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, authorities));
+    }
+
+    /** Усечение + экранирование управляющих символов для читаемых логов. */
+    private static String preview(String s, int max) {
+        if (s == null) return "";
+        String esc = s.replace("", "\\e")
+                      .replace("\r", "\\r")
+                      .replace("\n", "\\n")
+                      .replace("\t", "\\t");
+        return esc.length() <= max ? esc : esc.substring(0, max) + "…(len=" + s.length() + ")";
     }
 
     @Override

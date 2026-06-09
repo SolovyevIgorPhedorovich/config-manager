@@ -56,23 +56,29 @@ public class SecurityConfig {
                 .requestMatchers("/api/actuator/health", "/api/actuator/health/**").permitAll()  // health открыт для мониторинга
 
                 // ── Контроль доступа по ролям (RBAC) ──────────────────────────────
-                // ADMIN    — всё, включая управление пользователями/ролями
-                // OPERATOR — управление устройствами/конфигами/сканом/терминалом
-                // VIEWER   — только чтение (GET)
-                .requestMatchers("/api/v1/users/**").hasRole("ADMIN")                        // пользователи и роли
-                .requestMatchers("/api/v1/settings/**").hasRole("ADMIN")                      // системные настройки (AD и др.)
-                .requestMatchers(HttpMethod.GET, "/api/v1/devices/scan", "/api/v1/devices/scan/**")
-                    .hasAnyRole("ADMIN", "OPERATOR")                                          // скан пишет устройства
-                .requestMatchers("/api/v1/devices/*/terminal/**").hasAnyRole("ADMIN", "OPERATOR") // терминал
-                .requestMatchers("/api/commands/**").hasAnyRole("ADMIN", "OPERATOR")          // удалённые команды
-                .requestMatchers("/api/v1/devices/configure").hasAnyRole("ADMIN", "OPERATOR") // применение конфига
-                .requestMatchers(HttpMethod.POST, "/api/v1/config/**", "/api/v1/templates/**")
-                    .hasAnyRole("ADMIN", "OPERATOR")                                          // сравнение/создание конфигов и шаблонов
-                .requestMatchers(HttpMethod.POST,   "/api/v1/devices/**").hasAnyRole("ADMIN", "OPERATOR")
-                .requestMatchers(HttpMethod.PUT,    "/api/v1/devices/**").hasAnyRole("ADMIN", "OPERATOR")
-                .requestMatchers(HttpMethod.DELETE, "/api/v1/devices/**").hasAnyRole("ADMIN", "OPERATOR")
+                // ADMIN   — всё: устройства/конфиги/скан/терминал/команды,
+                //           пользователи/настройки, аудит-логи
+                // AUDITOR — чтение (GET) + просмотр аудит-логов; без изменений
+                // VIEWER  — только чтение (GET)
+                .requestMatchers("/api/v1/users/**").hasRole("ADMIN")                         // пользователи и роли
+                .requestMatchers("/api/v1/settings/**").hasRole("ADMIN")                       // системные настройки (AD и др.)
 
-                .anyRequest().authenticated()  // остальное (чтение) — любой аутентифицированный
+                // Аудит-логи — ADMIN и AUDITOR (надзор за действиями)
+                .requestMatchers(HttpMethod.GET, "/api/v1/event/**").hasAnyRole("ADMIN", "AUDITOR")
+
+                // ── Изменяющие операции — только ADMIN ───────────────────────────
+                .requestMatchers(HttpMethod.GET, "/api/v1/devices/scan", "/api/v1/devices/scan/**")
+                    .hasRole("ADMIN")                                                          // скан пишет устройства
+                .requestMatchers("/api/v1/devices/*/terminal/**").hasRole("ADMIN")             // терминал
+                .requestMatchers("/api/commands/**").hasRole("ADMIN")                          // удалённые команды
+                .requestMatchers("/api/v1/devices/configure").hasRole("ADMIN")                 // применение конфига
+                .requestMatchers(HttpMethod.POST, "/api/v1/config/**", "/api/v1/templates/**")
+                    .hasRole("ADMIN")                                                          // сравнение/создание конфигов и шаблонов
+                .requestMatchers(HttpMethod.POST,   "/api/v1/devices/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.PUT,    "/api/v1/devices/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.DELETE, "/api/v1/devices/**").hasRole("ADMIN")
+
+                .anyRequest().authenticated()  // остальное (чтение GET) — любой аутентифицированный
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

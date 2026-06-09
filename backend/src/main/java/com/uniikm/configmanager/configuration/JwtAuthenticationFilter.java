@@ -14,6 +14,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.uniikm.configmanager.auth.service.JwtService;
 import com.uniikm.configmanager.auth.service.TokenBlacklistService;
+import com.uniikm.configmanager.auth.utils.CustomUserDetails;
 
 import java.io.IOException;
 import java.util.List;
@@ -55,11 +56,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             // Токен валиден И не отозван (logout / ротация refresh)
             if (jwtService.isTokenValid(token) && !blacklist.isBlacklisted(jwtService.extractJti(token))) {
+                // Нормализуем префикс ROLE_ (как в CustomUserDetails) — иначе hasRole(...)
+                // не совпадёт со старыми токенами, где роль без префикса.
                 List<SimpleGrantedAuthority> authorities = jwtService.extractRoles(token).stream()
+                    .map(r -> r.startsWith("ROLE_") ? r : "ROLE_" + r)
                     .map(SimpleGrantedAuthority::new)
                     .collect(Collectors.toList());
+                // Principal — CustomUserDetails (а не голая строка), чтобы аудит мог
+                // получить userId через SecurityFacade.currentUserId().
+                CustomUserDetails principal =
+                    new CustomUserDetails(jwtService.extractUserId(token), username, authorities);
                 UsernamePasswordAuthenticationToken authToken =
-                    new UsernamePasswordAuthenticationToken(username, null, authorities);
+                    new UsernamePasswordAuthenticationToken(principal, null, authorities);
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
             }

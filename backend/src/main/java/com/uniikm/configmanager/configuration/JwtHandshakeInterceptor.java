@@ -43,7 +43,18 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
         String username = jwtService.extractUsername(token);
         var roles = jwtService.extractRoles(token);
 
+        // Терминал — изменяющая операция, доступна только ADMIN (см. матрицу RBAC в
+        // SecurityConfig). Сам путь /ws/** в http-цепочке permitAll, поэтому роль
+        // проверяем здесь. Нормализуем префикс ROLE_, как в CustomUserDetails.
+        boolean isAdmin = roles != null && roles.stream()
+                .map(r -> r.startsWith("ROLE_") ? r : "ROLE_" + r)
+                .anyMatch("ROLE_ADMIN"::equals);
+        if (!isAdmin) {
+            return false;
+        }
+
         attributes.put("username", username);
+        attributes.put("userId", jwtService.extractUserId(token));
         attributes.put("roles", roles);
 
         // 🔥 CRITICAL: set principal for Spring WS
