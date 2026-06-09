@@ -1,4 +1,4 @@
-package com.project.setting_manager;
+package com.uniikm.configmanager;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
