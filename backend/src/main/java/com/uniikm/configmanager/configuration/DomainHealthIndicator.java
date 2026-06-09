@@ -1,22 +1,19 @@
 package com.uniikm.configmanager.configuration;
 
-import javax.naming.directory.DirContext;
-
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
-import org.springframework.ldap.core.support.LdapContextSource;
 import org.springframework.stereotype.Component;
 
+import com.uniikm.configmanager.auth.model.AdSettings;
+import com.uniikm.configmanager.auth.service.AdSettingsService;
+
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
  * Проверка доступности домена (Active Directory / LDAP) для /actuator/health.
  *
- * Заменяет штатный {@code LdapHealthIndicator} Spring Boot, который пытается
- * подключиться к LDAP всегда — даже когда доменная аутентификация выключена
- * ({@code ad.enabled=false}) — и роняет общий статус в DOWN на плейсхолдере
- * dc.company.local. Здесь:
+ * Настройки AD берутся из {@link AdSettingsService} (редактируются из интерфейса):
  *   - AD выключен  → UP, деталь "disabled" (подключение не проверяется);
  *   - AD включён   → реальная проверка коннекта к контроллеру домена.
  *
@@ -24,65 +21,37 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component("domain")
+@RequiredArgsConstructor
 public class DomainHealthIndicator implements HealthIndicator {
 
-    private final LdapContextSource contextSource;
-
-    @Value("${ad.enabled:false}")
-    private boolean adEnabled;
-
-    @Value("${ad.url:ldap://dc.company.local:389}")
-    private String url;
-
-    @Value("${ad.base:DC=company,DC=local}")
-    private String baseDn;
-
-    public DomainHealthIndicator(LdapContextSource contextSource) {
-        this.contextSource = contextSource;
-    }
+    private final AdSettingsService adSettingsService;
 
     @Override
     public Health health() {
-        if (!adEnabled) {
-            // Домен не используется — это не ошибка, не валим health.
+        AdSettings s = adSettingsService.current();
+
+        if (!s.isEnabled()) {
             return Health.up()
                     .withDetail("ad", "disabled")
-                    .withDetail("hint", "ad.enabled=false — доменная аутентификация выключена, используется локальная БД")
+                    .withDetail("hint", "доменная аутентификация выключена, используется локальная БД")
                     .build();
         }
 
-        DirContext ctx = null;
-        try {
-            ctx = contextSource.getReadOnlyContext(); // реальный коннект к DC (с таймаутами)
+        String error = adSettingsService.testConnection(s);
+        if (error == null) {
             return Health.up()
                     .withDetail("ad", "enabled")
-                    .withDetail("url", url)
-                    .withDetail("baseDn", baseDn)
+                    .withDetail("url", s.getUrl())
+                    .withDetail("baseDn", s.getBaseDn())
                     .withDetail("connection", "established")
                     .build();
-        } catch (Exception e) {
-            log.warn("Проверка домена не прошла ({}): {}", url, rootMessage(e));
-            return Health.down()
-                    .withDetail("ad", "enabled")
-                    .withDetail("url", url)
-                    .withDetail("baseDn", baseDn)
-                    .withDetail("error", rootMessage(e))
-                    .build();
-        } finally {
-            if (ctx != null) {
-                try { ctx.close(); } catch (Exception ignored) {}
-            }
         }
-    }
-
-    private String rootMessage(Throwable t) {
-        Throwable root = t;
-        while (root.getCause() != null && root.getCause() != root) {
-            root = root.getCause();
-        }
-        String msg = root.getMessage();
-        return (msg == null || msg.isBlank())
-                ? root.getClass().getSimpleName()
-                : root.getClass().getSimpleName() + ": " + msg;
+        log.warn("Проверка домена не прошла ({}): {}", s.getUrl(), error);
+        return Health.down()
+                .withDetail("ad", "enabled")
+                .withDetail("url", s.getUrl())
+                .withDetail("baseDn", s.getBaseDn())
+                .withDetail("error", error)
+                .build();
     }
 }

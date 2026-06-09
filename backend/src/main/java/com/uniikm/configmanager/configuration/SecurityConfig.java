@@ -60,6 +60,7 @@ public class SecurityConfig {
                 // OPERATOR — управление устройствами/конфигами/сканом/терминалом
                 // VIEWER   — только чтение (GET)
                 .requestMatchers("/api/v1/users/**").hasRole("ADMIN")                        // пользователи и роли
+                .requestMatchers("/api/v1/settings/**").hasRole("ADMIN")                      // системные настройки (AD и др.)
                 .requestMatchers(HttpMethod.GET, "/api/v1/devices/scan", "/api/v1/devices/scan/**")
                     .hasAnyRole("ADMIN", "OPERATOR")                                          // скан пишет устройства
                 .requestMatchers("/api/v1/devices/*/terminal/**").hasAnyRole("ADMIN", "OPERATOR") // терминал

@@ -221,3 +221,30 @@ ALTER TABLE event_log DROP CONSTRAINT IF EXISTS audit_log_action_type_check;
 -- event_log: aggregate_id и aggregate_type должны быть nullable (AuthEvent их не заполняет)
 ALTER TABLE event_log ALTER COLUMN aggregate_id   DROP NOT NULL;
 ALTER TABLE event_log ALTER COLUMN aggregate_type DROP NOT NULL;
+
+-- ============================================================
+-- Базовые роли RBAC (идемпотентно). Доступ к функциям настраивается в SecurityConfig:
+--   ROLE_ADMIN    — полный доступ, включая управление пользователями/ролями
+--   ROLE_OPERATOR — устройства, конфиги, скан, терминал, удалённые команды
+--   ROLE_VIEWER   — только чтение (GET)
+-- ============================================================
+INSERT INTO roles (name, description) VALUES
+    ('ROLE_ADMIN',    'Администратор: полный доступ, управление пользователями и ролями'),
+    ('ROLE_OPERATOR', 'Оператор: устройства, конфигурации, сканирование, терминал'),
+    ('ROLE_VIEWER',   'Наблюдатель: только просмотр (read-only)')
+ON CONFLICT (name) DO NOTHING;
+
+-- ============================================================
+-- Настройки доменной аутентификации (AD/LDAP), редактируемые из интерфейса.
+-- Одна строка (id = 1); создаётся приложением из значений по умолчанию.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ad_settings (
+    id                 BIGINT PRIMARY KEY,
+    enabled            BOOLEAN      NOT NULL DEFAULT FALSE,
+    url                VARCHAR(512) NOT NULL DEFAULT 'ldap://dc.company.local:389',
+    base_dn            VARCHAR(512) NOT NULL DEFAULT 'DC=company,DC=local',
+    user_dn            VARCHAR(512),
+    password           VARCHAR(512),
+    user_search_filter VARCHAR(256) NOT NULL DEFAULT '(sAMAccountName={0})',
+    updated_at         TIMESTAMP
+);

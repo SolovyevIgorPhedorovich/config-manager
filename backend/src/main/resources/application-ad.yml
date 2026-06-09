@@ -1,0 +1,14 @@
+# Профиль доменной аутентификации (AD/LDAP).
+# Запуск:  SPRING_PROFILES_ACTIVE=ad  + переменные окружения ниже.
+# Значения используются ТОЛЬКО для первичного заполнения настроек в БД
+# (таблица ad_settings). После этого настройки редактируются через интерфейс
+# (Администрирование → Настройки → AD) и хранятся в БД.
+#
+# Секреты (AD_PASSWORD) держим в окружении, а не в репозитории.
+ad:
+  enabled: ${AD_ENABLED:true}
+  url: ${AD_URL:ldap://dc.company.local:389}
+  base: ${AD_BASE:DC=company,DC=local}
+  userDn: ${AD_USER_DN:}
+  password: ${AD_PASSWORD:}
+  userSearchFilter: ${AD_USER_SEARCH_FILTER:(sAMAccountName={0})}

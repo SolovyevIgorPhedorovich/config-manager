@@ -1,9 +1,7 @@
 package com.uniikm.configmanager.auth.service;
 
-import lombok.Data;
-import org.springframework.beans.factory.annotation.Value;
+import lombok.RequiredArgsConstructor;
 import org.springframework.ldap.core.LdapTemplate;
-import org.springframework.ldap.core.support.LdapContextSource;
 import org.springframework.ldap.query.LdapQuery;
 import org.springframework.ldap.query.LdapQueryBuilder;
 import org.springframework.security.authentication.AuthenticationProvider;
@@ -19,36 +17,17 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import com.uniikm.configmanager.auth.model.AdSettings;
 import com.uniikm.configmanager.auth.utils.CustomUserDetails;
 
 import java.util.List;
 
 @Component
-@Data
+@RequiredArgsConstructor
 public class AdAuthenticationProvider implements AuthenticationProvider {
 
-    @Value("${ad.enabled:false}")
-    private boolean adEnabled;
-
-    @Value("${ad.url:ldap://dc.company.local:389}")
-    private String url;
-
-    @Value("${ad.base:DC=company,DC=local}")
-    private String baseDn;
-
-    @Value("${ad.userSearchFilter:(sAMAccountName={0})}")
-    private String userSearchFilter;
-
-    private final LdapTemplate ldapTemplate;
-    private final UserDetailsService userDetailsService; // загружает из БД
-
-    public AdAuthenticationProvider(LdapContextSource contextSource, UserDetailsService userDetailsService) {
-        this.ldapTemplate = new LdapTemplate(contextSource);
-        // AD при поиске от корня домена возвращает continuation references;
-        // игнорируем PartialResultException, иначе поиск пользователя падает.
-        this.ldapTemplate.setIgnorePartialResultException(true);
-        this.userDetailsService = userDetailsService;
-    }
+    private final AdSettingsService adSettingsService;     // настройки AD из БД (редактируемые)
+    private final UserDetailsService userDetailsService;   // локальные учётки из БД
 
     @Override
     public boolean supports(Class<?> authentication) {
@@ -61,8 +40,9 @@ public class AdAuthenticationProvider implements AuthenticationProvider {
         String password = (String) authentication.getCredentials();
         String authType = resolveAuthType();
 
-        if ("AD".equalsIgnoreCase(authType) && adEnabled) {
-            return authenticateUsingAd(username, password);
+        AdSettings settings = adSettingsService.current();
+        if ("AD".equalsIgnoreCase(authType) && settings.isEnabled()) {
+            return authenticateUsingAd(username, password, settings);
         }
 
         return authenticateUsingDatabase(username, password);
@@ -85,12 +65,14 @@ public class AdAuthenticationProvider implements AuthenticationProvider {
         throw new BadCredentialsException("Invalid credentials");
     }
 
-    private Authentication authenticateUsingAd(String username, String password) {
+    private Authentication authenticateUsingAd(String username, String password, AdSettings settings) {
         try {
+            LdapTemplate ldapTemplate = adSettingsService.ldapTemplate(settings);
+
             // base НЕ указываем: LdapContextSource уже настроен на baseDn,
             // поиск идёт относительно него (иначе base удваивается -> NO_OBJECT).
             LdapQuery query = LdapQueryBuilder.query()
-                .filter(userSearchFilter.replace("{0}", username));
+                .filter(settings.getUserSearchFilter().replace("{0}", username));
 
             // Домен подтверждает пароль (bind под учёткой пользователя)
             ldapTemplate.authenticate(query, password);

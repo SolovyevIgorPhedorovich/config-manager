@@ -6,6 +6,7 @@ import {
 import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { devicesApi } from '../api/devicesApi';
+import AdSettingsForm from '../components/AdSettingsForm';
 import type { ScanSchedule, ScanCredential } from '../types';
 import UserManager from '../components/UserManager';
 
@@ -682,25 +683,7 @@ export default function AdminPage() {
         </TabPane>
 
         <TabPane tab="Active Directory" key="2">
-          <Card title="Настройка интеграции с Active Directory">
-            <Form form={form} layout="vertical" onFinish={handleSubmit}>
-              <Form.Item name="adEnabled" label="Включить AD" valuePropName="checked">
-                <Switch />
-              </Form.Item>
-              <Form.Item name="adUrl" label="URL LDAP (AD)" rules={[{ required: true }]}>
-                <Input placeholder="ldap://dc.company.local:389" disabled={!adEnabled} />
-              </Form.Item>
-              <Form.Item name="adBaseDn" label="Базовый DN">
-                <Input placeholder="DC=company,DC=local" disabled={!adEnabled} />
-              </Form.Item>
-              <Form.Item name="adUserSearchFilter" label="Фильтр поиска пользователя">
-                <Input placeholder="(sAMAccountName={0})" disabled={!adEnabled} />
-              </Form.Item>
-              <Button type="primary" htmlType="submit" loading={loading}>
-                Сохранить настройки AD
-              </Button>
-            </Form>
-          </Card>
+          <AdSettingsForm />
         </TabPane>
 
         <TabPane tab="Смена пароля admin" key="3">
