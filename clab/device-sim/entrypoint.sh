@@ -43,7 +43,7 @@ agentAddress udp:161
 rocommunity ${SNMP_COMMUNITY:-public}
 # Подменяем стандартные OID system-группы под изображаемое устройство
 override .1.3.6.1.2.1.1.1.0 octet_str "${DESCR}"
-override .1.3.6.1.2.1.1.2.0 objectid ${OBJID}
+override .1.3.6.1.2.1.1.2.0 object_id ${OBJID}
 override .1.3.6.1.2.1.1.4.0 octet_str "ConfigManager Test Lab"
 override .1.3.6.1.2.1.1.5.0 octet_str "${NAME}"
 override .1.3.6.1.2.1.1.6.0 octet_str "containerlab"
@@ -70,10 +70,10 @@ fi
 
 # ── Запуск (один процесс держим на переднем плане) ─────────────────────────
 if [ "${ENABLE_SNMP:-true}" = "true" ] && [ "${ENABLE_SSH:-true}" != "true" ]; then
-  exec snmpd -f -Lo -c /etc/snmp/snmpd.conf
+  exec snmpd -f -Lo -C -c /etc/snmp/snmpd.conf
 fi
 
 if [ "${ENABLE_SNMP:-true}" = "true" ]; then
-  snmpd -Lf /dev/null -c /etc/snmp/snmpd.conf   # фоновый демон
+  snmpd -Lf /dev/null -C -c /etc/snmp/snmpd.conf   # фоновый демон
 fi
 exec /usr/sbin/sshd -D -e

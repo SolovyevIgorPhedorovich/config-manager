@@ -22,11 +22,9 @@ public class WebSocketConfig implements WebSocketConfigurer {
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(handler, "/ws/terminal")
                 .addInterceptors(jwtHandshakeInterceptor)
-                .setAllowedOrigins(
-                    "http://localhost:5174",
-                        "http://localhost:5173",
-                        "http://localhost:4173",
-                        "http://localhost:4174"
-                );
+                // Разрешаем любой origin: WS идёт напрямую (не через vite-прокси),
+                // и фикс-список портов ломал рукопожатие при отдаче сборки с другого
+                // порта. Доступ всё равно защищён JWT в JwtHandshakeInterceptor.
+                .setAllowedOriginPatterns("*");
     }
 }

@@ -56,7 +56,7 @@ public class User {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-     @ManyToMany
+     @ManyToMany(fetch = FetchType.EAGER) // нужны при загрузке UserDetails вне транзакции (RBAC)
     @JoinTable(
             name = "user_role",
             joinColumns = @JoinColumn(name = "user_id"),

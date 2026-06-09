@@ -24,3 +24,9 @@ frontend/.vite/
 # ── OS ─────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── Containerlab: сгенерированный вывод и результаты тестов ──
+# Создаётся при `clab deploy` (инвентари, TLS-ключи, topology-data) и прогонах
+# нагрузочных тестов — не исходники, содержит секреты (.tls/ca/ca.key).
+clab/topologies/clab-*/
+clab/tests/load/results/

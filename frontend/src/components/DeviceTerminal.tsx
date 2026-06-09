@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, Button, Form, InputNumber, Input, message, Typography } from 'antd';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
@@ -34,6 +34,20 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
   const defaultHost = device?.ip || 'localhost';
   const defaultUser = device?.os?.toUpperCase() === 'WINDOWS' ? 'Administrator' : 'root';
 
+  // Надёжный фокус терминала: xterm.focus() + прямой фокус на helper-textarea
+  // (в Firefox это критично — через него xterm перехватывает клавиатуру).
+  const focusTerminal = useCallback(() => {
+    const term = terminalRef.current;
+    if (!term) return;
+    term.focus();
+    // Фокус на textarea ИМЕННО живого терминала (term.element), а не на первом
+    // .xterm-helper-textarea в DOM — иначе при оставшемся «зомби» фокус уходит
+    // на чужой элемент без обработчиков, и клавиши никуда не идут.
+    const el = (term as unknown as { element?: HTMLElement }).element;
+    const ta = el?.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
+    ta?.focus();
+  }, []);
+
   useEffect(() => {
     if (device && open) {
       form.setFieldsValue({
@@ -49,6 +63,11 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
 
     const initTerminal = () => {
       if (!termRef.current) return;
+
+      // Защита от «зомби»: убираем прежний инстанс и его DOM, чтобы в контейнере
+      // был ровно один терминал (иначе фокус уходит на чужой textarea).
+      terminalRef.current?.dispose();
+      termRef.current.innerHTML = '';
 
       const term = new XTerm({
         fontSize: 14,
@@ -68,7 +87,27 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
       fitAddon.fit();
       term.focus();
 
+      // Стартовая строка: позиционирует курсор → helper-textarea получает
+      // реальные размеры/позицию (в Firefox 0×0 off-screen textarea может не
+      // получать keydown).
+      term.writeln('\x1b[90mТерминал готов. Заполните поля и нажмите Connect.\x1b[0m');
+
+      // ДИАГНОСТИКА: доходят ли нажатия до xterm (keydown) — лог в консоль.
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type === 'keydown') {
+          // eslint-disable-next-line no-console
+          console.log('[terminal] keydown:', e.key, 'code=', e.code);
+        }
+        return true; // не блокируем обработку
+      });
+
       term.onData((data) => {
+        // eslint-disable-next-line no-console
+        console.log(
+          '[terminal] onData:', JSON.stringify(data),
+          '| wsOpen=', socketRef.current?.readyState === WebSocket.OPEN,
+          '| sessionId=', sessionIdRef.current
+        );
         if (socketRef.current?.readyState === WebSocket.OPEN && sessionIdRef.current) {
           const isWindows = device?.os?.toUpperCase() === 'WINDOWS';
 
@@ -198,6 +237,9 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
       const socket = new WebSocket(
         `ws://localhost:8080/ws/terminal?token=${token}`
       );
+      // КРИТИЧНО: сохраняем сокет в ref — иначе onData видит socketRef.current=null,
+      // гейт wsOpen всегда ложный, и нажатия не уходят на сервер.
+      socketRef.current = socket;
 
       socket.onopen = () => {
         message.success('Соединение установлено');
@@ -215,7 +257,7 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
         // AntD Modal (rc-dialog) после анимации открытия сам фокусирует панель
         // модалки и перебивает наш ранний focus(). Ставим фокус несколько раз,
         // чтобы выиграть гонку с этим пост-анимационным фокусом.
-        [50, 350, 600].forEach((d) => setTimeout(() => terminalRef.current?.focus(), d));
+        [50, 350, 600].forEach((d) => setTimeout(focusTerminal, d));
       };
 
       socket.onmessage = (event) => {
@@ -242,17 +284,22 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
       };
 
       socket.onerror = (err) => {
-        console.error('WebSocket error', err);
+        // eslint-disable-next-line no-console
+        console.log('[terminal] WS error', err);
         message.error('WebSocket ошибка');
       };
 
       socket.onclose = (event) => {
+        // eslint-disable-next-line no-console
+        console.log('[terminal] WS closed: code=', event.code, 'reason=', event.reason, 'wasClean=', event.wasClean);
         if (event.wasClean) {
           message.info('Соединение закрыто');
         } else {
           message.warning('Соединение разорвано');
         }
-        terminalRef.current?.write('\r\n\x1b[31mСоединение закрыто\x1b[0m\r\n');
+        terminalRef.current?.write(
+          `\r\n\x1b[31mСоединение закрыто (code ${event.code}${event.reason ? ', ' + event.reason : ''})\x1b[0m\r\n`
+        );
         inputBufferRef.current = '';
       };
     } catch (err: any) {
@@ -276,7 +323,7 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
       // Фокус после завершения анимации открытия — когда rc-dialog уже
       // выполнил свой автофокус на панель модалки и не перебьёт наш.
       afterOpenChange={(opened) => {
-        if (opened) setTimeout(() => terminalRef.current?.focus(), 50);
+        if (opened) setTimeout(focusTerminal, 50);
       }}
     >
       <Form
@@ -312,13 +359,11 @@ export default function DeviceTerminal({ open, onClose, device }: Props) {
 
       <div
         style={{ background: '#111', marginTop: 12, padding: 8 }}
-        // preventDefault не даёт браузеру увести фокус на кликнутый span после
-        // mousedown — иначе наш focus() сразу перебивается и клавиатура не ловится.
-        // DOM-рендерер xterm использует собственное выделение, копирование не страдает.
-        onMouseDown={(e) => {
-          e.preventDefault();
-          terminalRef.current?.focus();
-        }}
+        // Фокусируем на mouseUp/click БЕЗ preventDefault: в Firefox preventDefault
+        // на mousedown подавляет фокус (это штатный приём «не забирать фокус»),
+        // из-за чего клавиатура переставала перехватываться.
+        onMouseUp={focusTerminal}
+        onClick={focusTerminal}
       >
         <div ref={termRef} style={{ height: '60vh' }} />
       </div>
