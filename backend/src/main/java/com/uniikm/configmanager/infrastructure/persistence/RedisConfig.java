@@ -1,4 +1,4 @@
-package com.uniikm.configmanager.infrastrucutre.persistence;
+package com.uniikm.configmanager.infrastructure.persistence;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

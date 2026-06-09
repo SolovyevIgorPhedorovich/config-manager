@@ -1,4 +1,4 @@
-package com.uniikm.configmanager.infrastrucutre.persistence;
+package com.uniikm.configmanager.infrastructure.persistence;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
