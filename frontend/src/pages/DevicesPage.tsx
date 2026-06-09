@@ -7,6 +7,7 @@ import { configApi } from '../api/configApi';
 import { eventApi } from '../api/eventApi';
 import type { ConfigVersion, Device, EventLog } from '../types';
 import { eventActionLabel, eventResult, eventResultColor } from '../utils/eventLabels';
+import { getErrorMessage } from '../utils/errorMessage';
 import SSHClient from '../components/DeviceTerminal';
 import { ArrowRightOutlined, CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined } from "@ant-design/icons"
 import { ScanDeviceModal } from '../components/ScanDeviceModal';
@@ -144,7 +145,7 @@ export default function DevicesPage({ type }: { type?: string }) {
       }
       setDevices(list);
     } catch (err) {
-      message.error('Ошибка загрузки устройств');
+      message.error(getErrorMessage(err, 'Ошибка загрузки устройств'));
       setDevices([]);
     } finally {
       setLoading(false);
@@ -171,6 +172,7 @@ export default function DevicesPage({ type }: { type?: string }) {
       setDeviceLogs(res.data);
     } catch (err) {
       console.error('Не удалось загрузить журнал событий:', err);
+      message.error(getErrorMessage(err, 'Не удалось загрузить журнал событий'));
       setDeviceLogs([]);
     } finally {
       setAuditLoading(false);
@@ -222,7 +224,7 @@ export default function DevicesPage({ type }: { type?: string }) {
         setCompareVersionId(undefined);
       }
     } catch (err) {
-      message.error('Ошибка загрузки истории конфигураций');
+      message.error(getErrorMessage(err, 'Ошибка загрузки истории конфигураций'));
       setConfigVersions([]);
     }
   };
@@ -708,7 +710,7 @@ const handleBulkDelete = async () => {
       message.success('Устройство успешно добавлено');
       setDevices(prev => [...prev, res.data]);
     } catch (err) {
-      message.error('Не удалось добавить устройство');
+      message.error(getErrorMessage(err, 'Не удалось добавить устройство'));
     }
   };
 

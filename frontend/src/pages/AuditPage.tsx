@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, DatePicker, Select, Space, Table, Tag, Typography } from 'antd';
+import { Card, DatePicker, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { getErrorMessage } from '../utils/errorMessage';
 import dayjs from 'dayjs';
 import { eventApi } from '../api/eventApi';
 import { authApi } from '../api/authApi';
@@ -88,6 +89,7 @@ export default function AuditPage() {
         setRows(merged.sort((a, b) => b.timestamp - a.timestamp));
       } catch (err) {
         console.error('Failed to load audit logs:', err);
+        message.error(getErrorMessage(err, 'Не удалось загрузить журнал аудита'));
         setRows(demoAuditRows);
       }
     };

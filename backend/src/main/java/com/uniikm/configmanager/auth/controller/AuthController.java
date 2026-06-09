@@ -3,7 +3,6 @@ package com.uniikm.configmanager.auth.controller;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.annotation.*;
 
 import com.uniikm.configmanager.auth.dto.LoginRequest;
@@ -20,12 +19,9 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@RequestBody LoginRequest request) {
-        try {
-            LoginResponse response = authFacade.login(request);
-            return ResponseEntity.ok(response);
-        } catch (BadCredentialsException ex) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        }
+        // BadCredentialsException обрабатывается в GlobalExceptionHandler:
+        // отдаётся 401 с кратким сообщением в теле для интерфейса.
+        return ResponseEntity.ok(authFacade.login(request));
     }
 
     @GetMapping("/user")

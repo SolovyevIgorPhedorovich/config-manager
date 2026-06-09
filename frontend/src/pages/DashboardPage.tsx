@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Card, Table, Tag, Typography, Row, Col, Statistic,
-  Empty
+  Empty, message
 } from 'antd';
+import { getErrorMessage } from '../utils/errorMessage';
 import { Pie, Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -76,6 +77,7 @@ export default function DashboardPage() {
       setDevices([]);
       setAuditLogs([]);
       console.error('Ошибка загрузки данных:', err);
+      message.error(getErrorMessage(err, 'Не удалось загрузить данные дашборда'));
     } finally {
       setLoading(false);
     }
