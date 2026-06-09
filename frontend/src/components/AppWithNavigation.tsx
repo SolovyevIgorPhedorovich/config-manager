@@ -18,6 +18,7 @@ import DashboardPage from '../pages/DashboardPage';
 import AuditPage from '../pages/AuditPage';
 import TemplatesPage from '../pages/TemplatesPage';
 import SystemHealthBanner from './SystemHealthBanner';
+import { authApi } from '../api/authApi';
 
 const { Header, Content, Sider } = Layout;
 const { SubMenu } = Menu;
@@ -38,10 +39,9 @@ function AppWithNavigation() {
   };
 
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
-    localStorage.removeItem('role');
+  const handleLogout = async () => {
+    // Отзываем токены на сервере (чёрный список), затем чистим локальные данные
+    await authApi.logout();
     navigate('/login', { replace: true });
   };
 

@@ -48,12 +48,30 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                .requestMatchers("/ws/**").permitAll() 
+                .requestMatchers("/ws/**").permitAll()
                 .requestMatchers("/api/v1/auth/login").permitAll()   // логин открыт
+                .requestMatchers("/api/v1/auth/refresh").permitAll() // обновление токена по refresh
                 .requestMatchers("/api/v1/auth/user").permitAll()    // проверка токена
                 .requestMatchers("/error").permitAll()
                 .requestMatchers("/api/actuator/health", "/api/actuator/health/**").permitAll()  // health открыт для мониторинга
-                .anyRequest().authenticated()  // всё остальное требует токена
+
+                // ── Контроль доступа по ролям (RBAC) ──────────────────────────────
+                // ADMIN    — всё, включая управление пользователями/ролями
+                // OPERATOR — управление устройствами/конфигами/сканом/терминалом
+                // VIEWER   — только чтение (GET)
+                .requestMatchers("/api/v1/users/**").hasRole("ADMIN")                        // пользователи и роли
+                .requestMatchers(HttpMethod.GET, "/api/v1/devices/scan", "/api/v1/devices/scan/**")
+                    .hasAnyRole("ADMIN", "OPERATOR")                                          // скан пишет устройства
+                .requestMatchers("/api/v1/devices/*/terminal/**").hasAnyRole("ADMIN", "OPERATOR") // терминал
+                .requestMatchers("/api/commands/**").hasAnyRole("ADMIN", "OPERATOR")          // удалённые команды
+                .requestMatchers("/api/v1/devices/configure").hasAnyRole("ADMIN", "OPERATOR") // применение конфига
+                .requestMatchers(HttpMethod.POST, "/api/v1/config/**", "/api/v1/templates/**")
+                    .hasAnyRole("ADMIN", "OPERATOR")                                          // сравнение/создание конфигов и шаблонов
+                .requestMatchers(HttpMethod.POST,   "/api/v1/devices/**").hasAnyRole("ADMIN", "OPERATOR")
+                .requestMatchers(HttpMethod.PUT,    "/api/v1/devices/**").hasAnyRole("ADMIN", "OPERATOR")
+                .requestMatchers(HttpMethod.DELETE, "/api/v1/devices/**").hasAnyRole("ADMIN", "OPERATOR")
+
+                .anyRequest().authenticated()  // остальное (чтение) — любой аутентифицированный
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

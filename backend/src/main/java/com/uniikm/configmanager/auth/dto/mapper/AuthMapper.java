@@ -9,7 +9,7 @@ import com.uniikm.configmanager.auth.dto.LoginResponse;
 @Component
 public class AuthMapper {
 
-    public LoginResponse toResponse(String token, Authentication authentication) {
-        return new LoginResponse(token, authentication.getName());
+    public LoginResponse toResponse(String accessToken, String refreshToken, Authentication authentication) {
+        return new LoginResponse(accessToken, refreshToken, authentication.getName());
     }
 }

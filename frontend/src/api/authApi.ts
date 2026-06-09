@@ -39,6 +39,7 @@ export const authApi = {
 
   removeToken: (): void => {
     localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
     localStorage.removeItem('username');
     localStorage.removeItem('role');
   },
@@ -49,8 +50,8 @@ export const authApi = {
     return await authApi.verifyToken(token);
   },
 
-  login: async (credentials: { 
-    username: string; 
+  login: async (credentials: {
+    username: string;
     password: string;
     authType?: string;
   }) => {
@@ -59,18 +60,37 @@ export const authApi = {
         'X-Auth-Type': credentials.authType || 'DB'
       }
     });
-    
-    const { token, username, role } = response.data;
-    
+
+    const { token, refreshToken, username, role } = response.data;
+
     // Сохраняем все полученные данные
     if (token) authApi.setToken(token);
+    if (refreshToken) localStorage.setItem('refreshToken', refreshToken);
     if (username) localStorage.setItem('username', username);
     if (role) localStorage.setItem('role', role);
-    
+
     return response.data;
   },
 
-  logout: (): void => {
+  // Обновление access-токена по refresh-токену (вызывается перехватчиком при 401)
+  refresh: async (): Promise<string | null> => {
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (!refreshToken) return null;
+    const response = await apiClient.post('/v1/auth/refresh', { refreshToken });
+    const { token, refreshToken: newRefresh } = response.data;
+    if (token) authApi.setToken(token);
+    if (newRefresh) localStorage.setItem('refreshToken', newRefresh);
+    return token ?? null;
+  },
+
+  logout: async (): Promise<void> => {
+    const refreshToken = localStorage.getItem('refreshToken');
+    try {
+      // Отзываем токены на сервере (чёрный список)
+      await apiClient.post('/v1/auth/logout', { refreshToken });
+    } catch {
+      // даже при ошибке очищаем локальные данные
+    }
     authApi.removeToken();
   }
 };

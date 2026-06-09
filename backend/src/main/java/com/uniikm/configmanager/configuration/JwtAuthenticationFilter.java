@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.uniikm.configmanager.auth.service.JwtService;
+import com.uniikm.configmanager.auth.service.TokenBlacklistService;
 
 import java.io.IOException;
 import java.util.List;
@@ -23,6 +24,7 @@ import java.util.stream.Collectors;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
+    private final TokenBlacklistService blacklist;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -30,6 +32,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String method = request.getMethod();
         return "OPTIONS".equalsIgnoreCase(method)
                 || path.equals("/api/v1/auth/login")
+                || path.equals("/api/v1/auth/refresh")
                 || path.startsWith("/ws/")
                 || path.equals("/error");
     }
@@ -50,7 +53,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = authHeader.substring(7);
         String username = jwtService.extractUsername(token);
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            if (jwtService.isTokenValid(token)) {
+            // Токен валиден И не отозван (logout / ротация refresh)
+            if (jwtService.isTokenValid(token) && !blacklist.isBlacklisted(jwtService.extractJti(token))) {
                 List<SimpleGrantedAuthority> authorities = jwtService.extractRoles(token).stream()
                     .map(SimpleGrantedAuthority::new)
                     .collect(Collectors.toList());
