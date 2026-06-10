@@ -9,7 +9,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.uniikm.configmanager.device.dto.BulkDeleteResponse;
 import com.uniikm.configmanager.device.dto.DeleteError;
@@ -105,8 +107,34 @@ public class DeviceFacadeImpl implements DeviceFacade {
         return deviceService.getAllByIds(ids);
     }
 
+    /**
+     * Кэш фактической доступности устройств (id → online). Заполняется фоновым
+     * свипом {@link #refreshReachability()}, эндпоинт {@code /status} отдаёт его
+     * мгновенно. Так стоимость пинга = O(устройства) независимо от числа клиентов
+     * и не зависит от частоты опроса фронтом.
+     */
+    private volatile Map<Long, Boolean> reachabilityCache = Map.of();
+
     @Override
     public Map<Long, Boolean> getReachability() {
+        return reachabilityCache;
+    }
+
+    /**
+     * Фоновый пинг-свип: обновляет кэш доступности. fixedDelay — следующий запуск
+     * стартует только после завершения предыдущего, поэтому свипы не накладываются
+     * даже если часть хостов висит до таймаута.
+     */
+    @Scheduled(
+        initialDelayString = "${devices.status.initial-delay-ms:3000}",
+        fixedDelayString   = "${devices.status.refresh-ms:15000}"
+    )
+    @Transactional(readOnly = true)  // открываем сессию Hibernate — иначе ленивая DeviceInfo.ips падает вне веб-запроса
+    public void refreshReachability() {
+        reachabilityCache = computeReachability();
+    }
+
+    private Map<Long, Boolean> computeReachability() {
         List<DeviceResponse> devices = getAll();
 
         // Пингуем все устройства параллельно; каждый — со своим таймаутом,
