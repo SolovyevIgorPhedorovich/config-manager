@@ -23,8 +23,10 @@ import com.uniikm.configmanager.device.service.DeviceService;
 import com.uniikm.configmanager.integration.service.NetworkProbeService;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class DeviceFacadeImpl implements DeviceFacade {
 
@@ -131,7 +133,19 @@ public class DeviceFacadeImpl implements DeviceFacade {
     )
     @Transactional(readOnly = true)  // открываем сессию Hibernate — иначе ленивая DeviceInfo.ips падает вне веб-запроса
     public void refreshReachability() {
-        reachabilityCache = computeReachability();
+        long t0 = System.currentTimeMillis();
+        Map<Long, Boolean> fresh = computeReachability();
+        reachabilityCache = fresh;
+        long dur = System.currentTimeMillis() - t0;
+        long online = fresh.values().stream().filter(Boolean::booleanValue).count();
+        // Эндпоинт всё равно отдаёт кэш мгновенно; длинный свип лишь означает, что
+        // часть хостов недоступна (висят до таймаута) и кэш обновляется реже.
+        if (dur > 3000) {
+            log.warn("Пинг-свип затянулся: {} устройств ({} online) за {} мс — часть хостов недоступна",
+                    fresh.size(), online, dur);
+        } else {
+            log.debug("Пинг-свип: {} устройств ({} online) за {} мс", fresh.size(), online, dur);
+        }
     }
 
     private Map<Long, Boolean> computeReachability() {
