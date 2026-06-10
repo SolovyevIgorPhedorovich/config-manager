@@ -229,8 +229,15 @@ export default function ConfigFormViewer({
         configData: merged,
         credentials,
       });
-      if (res.data?.scheduledDeviceIds?.length) {
+      const outcome = await configApi.resolveApplyOutcome(res.data);
+      if (outcome.kind === 'failed') {
+        message.error(`Не удалось применить на ${hostname ?? deviceId}: ` + (outcome.error || 'устройство недоступно'));
+        return; // не сбрасываем правки — пользователь может повторить
+      }
+      if (outcome.kind === 'scheduled') {
         message.warning(`Устройство ${hostname ?? deviceId} офлайн — изменения применятся автоматически при появлении в сети`);
+      } else if (outcome.kind === 'pending') {
+        message.info(`Применение на ${hostname ?? deviceId} выполняется в фоне — проверьте статус позже`);
       } else {
         message.success(`Изменения отправлены на устройство ${hostname ?? deviceId}`);
       }

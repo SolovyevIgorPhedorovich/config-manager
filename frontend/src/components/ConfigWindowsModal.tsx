@@ -80,8 +80,15 @@ export default function ConfigWindowsModal({ open, onClose, hostname, deviceId }
         configData,
         credentials: { [deviceId]: { username: winrmUsername, password: winrmPassword, port: winrmPort ?? 5985 } },
       });
-      if (res.data?.scheduledDeviceIds?.length) {
+      const outcome = await configApi.resolveApplyOutcome(res.data);
+      if (outcome.kind === 'failed') {
+        message.error('Не удалось применить конфигурацию: ' + (outcome.error || 'устройство недоступно'));
+        return;
+      }
+      if (outcome.kind === 'scheduled') {
         message.warning('Устройство офлайн — конфигурация применится автоматически при появлении в сети');
+      } else if (outcome.kind === 'pending') {
+        message.info('Применение запущено и выполняется в фоне — проверьте статус позже');
       } else {
         message.success('Windows конфигурация применена' + (saveToMemory ? ' (точка восстановления создана)' : ''));
       }

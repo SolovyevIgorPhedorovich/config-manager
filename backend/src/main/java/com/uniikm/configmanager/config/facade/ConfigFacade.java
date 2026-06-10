@@ -21,4 +21,7 @@ public interface ConfigFacade {
     ConfigCompareResponse compare(ConfigCompareRequest request);
 
     List<ConfigStatusResponse> getStatus(String taskGroupId);
+
+    /** Фактический статус применения одной группы задач (config:apply:&lt;groupTaskId&gt;). */
+    ConfigStatusResponse getApplyGroupStatus(String groupTaskId);
 }

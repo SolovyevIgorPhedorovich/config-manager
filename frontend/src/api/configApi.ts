@@ -45,6 +45,22 @@ export interface ScheduledApply {
 
 export type DriftResolution = 'ACCEPT_DEVICE' | 'REAPPLY_STORED';
 
+// Фактический статус применения группы задач (config:apply:<groupTaskId>)
+export interface ApplyGroupStatus {
+  taskGroupId: string;
+  status: 'IN_PROGRESS' | 'SUCCESS' | 'FAILED' | 'UNKNOWN';
+  deviceId?: number;
+  startedAt?: string;
+  finishedAt?: string;
+  errorMessage?: string;
+}
+
+export type ApplyOutcome =
+  | { kind: 'success' }
+  | { kind: 'failed'; error?: string }
+  | { kind: 'scheduled' }
+  | { kind: 'pending' };   // не дождались терминального статуса за таймаут
+
 // API методы
 export const configApi = {
   /**
@@ -91,4 +107,36 @@ export const configApi = {
     credentials?: DeviceCredentials,
   ): Promise<AxiosResponse<ApplyConfigResponse>> =>
     apiClient.post(`/v1/devices/${deviceId}/config/resolve-drift`, { resolution, credentials }),
+
+  // ── Фактический результат применения ───────────────────────────────────────
+  getApplyGroupStatus: (groupTaskId: string): Promise<ApplyGroupStatus> =>
+    apiClient.get<ApplyGroupStatus>(`/v1/config/apply/${groupTaskId}/status`).then(r => r.data),
+
+  /** Опрашивает статус группы задач до терминального (SUCCESS/FAILED) или таймаута. */
+  waitForApply: async (groupTaskId: string, timeoutMs = 45000): Promise<ApplyGroupStatus> => {
+    const start = Date.now();
+    let last: ApplyGroupStatus = { taskGroupId: groupTaskId, status: 'UNKNOWN' };
+    while (Date.now() - start < timeoutMs) {
+      try {
+        last = await configApi.getApplyGroupStatus(groupTaskId);
+        if (last.status === 'SUCCESS' || last.status === 'FAILED') return last;
+      } catch { /* промежуточная ошибка опроса — повторим */ }
+      await new Promise(r => setTimeout(r, 1500));
+    }
+    return last;
+  },
+
+  /**
+   * Сводит ответ применения к итогу: офлайн → scheduled; иначе дожидается реального
+   * результата по первой группе задач (SUCCESS/FAILED), либо pending по таймауту.
+   */
+  resolveApplyOutcome: async (resp: ApplyConfigResponse): Promise<ApplyOutcome> => {
+    if (resp.scheduledDeviceIds?.length) return { kind: 'scheduled' };
+    const taskId = resp.taskGroupIds?.[0];
+    if (!taskId) return { kind: 'success' }; // нечего применять (нет изменений)
+    const status = await configApi.waitForApply(taskId);
+    if (status.status === 'SUCCESS') return { kind: 'success' };
+    if (status.status === 'FAILED') return { kind: 'failed', error: status.errorMessage };
+    return { kind: 'pending' };
+  },
 };

@@ -174,6 +174,10 @@ public class RemoteCommandService {
             if (!Boolean.TRUE.equals(connectResult.get("success"))) {
                 String errorMsg = "Connection failed: " + connectResult.getOrDefault("error", "unknown error");
                 saveFailure(queued, running.startedAt(), errorMsg);
+                // ВАЖНО: публикуем событие и при сбое подключения, иначе статус
+                // config:apply остаётся IN_PROGRESS навсегда, а интерфейс ложно
+                // показывает «успех».
+                publishTaskCompletedEvent(queued.groupTaskId(), TaskStatus.FAILED, null, errorMsg);
                 return;
             }
 

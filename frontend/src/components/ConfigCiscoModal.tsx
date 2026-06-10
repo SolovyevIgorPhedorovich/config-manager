@@ -155,8 +155,15 @@ export default function ConfigCiscoModal({ open, onClose, hostname, deviceId }: 
           [deviceId]: { username: sshUsername, password: sshPassword, port: sshPort ?? 22 },
         },
       });
-      if (res.data?.scheduledDeviceIds?.length) {
+      const outcome = await configApi.resolveApplyOutcome(res.data);
+      if (outcome.kind === 'failed') {
+        message.error('Не удалось применить конфигурацию: ' + (outcome.error || 'устройство недоступно'));
+        return; // оставляем окно открытым для повторной попытки
+      }
+      if (outcome.kind === 'scheduled') {
         message.warning('Устройство офлайн — конфигурация применится автоматически при появлении в сети');
+      } else if (outcome.kind === 'pending') {
+        message.info('Применение запущено и выполняется в фоне — проверьте статус позже');
       } else {
         message.success(
           saveToMemory

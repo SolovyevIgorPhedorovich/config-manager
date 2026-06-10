@@ -80,6 +80,33 @@ public class ConfigFacadeImpl implements ConfigFacade {
     }
 
     @Override
+    public ConfigStatusResponse getApplyGroupStatus(String groupTaskId) {
+        Map<Object, Object> h = redisTemplate.opsForHash().entries("config:apply:" + groupTaskId);
+        if (h == null || h.isEmpty()) {
+            // Ключ ещё не создан или истёк — считаем статус неизвестным
+            return new ConfigStatusResponse(groupTaskId, "UNKNOWN", null, null, null, null);
+        }
+        return new ConfigStatusResponse(
+                groupTaskId,
+                asStr(h.get("status")),
+                asLong(h.get("deviceId")),
+                asStr(h.get("startedAt")),
+                asStr(h.get("finishedAt")),
+                asStr(h.get("errorMessage"))
+        );
+    }
+
+    private String asStr(Object o) {
+        return o == null ? null : o.toString();
+    }
+
+    private Long asLong(Object o) {
+        if (o == null) return null;
+        if (o instanceof Number n) return n.longValue();
+        try { return Long.valueOf(o.toString()); } catch (NumberFormatException e) { return null; }
+    }
+
+    @Override
     public List<ConfigStatusResponse> getStatus(String batchId) {
         String key = "config:batch:" + batchId;
 

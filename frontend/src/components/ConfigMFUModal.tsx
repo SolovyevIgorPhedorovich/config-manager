@@ -54,8 +54,15 @@ export default function ConfigMFUModal({ open, onClose, hostname, deviceId }: Pr
         configData,
         credentials: {},   // МФУ конфигурируется через SNMP SET с management-сервера
       });
-      if (res.data?.scheduledDeviceIds?.length) {
+      const outcome = await configApi.resolveApplyOutcome(res.data);
+      if (outcome.kind === 'failed') {
+        message.error('Не удалось применить конфигурацию: ' + (outcome.error || 'устройство недоступно'));
+        return;
+      }
+      if (outcome.kind === 'scheduled') {
         message.warning('Устройство офлайн — конфигурация применится автоматически при появлении в сети');
+      } else if (outcome.kind === 'pending') {
+        message.info('Применение запущено и выполняется в фоне — проверьте статус позже');
       } else {
         message.success(
           saveToMemory

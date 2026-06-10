@@ -59,6 +59,12 @@ public class ConfigController {
          return ResponseEntity.ok(configFacade.getStatus(taskGroupId));
     }
 
+    /** Фактический статус применения группы задач (для опроса результата из интерфейса). */
+    @GetMapping("/config/apply/{groupTaskId}/status")
+    public ResponseEntity<ConfigStatusResponse> getApplyGroupStatus(@PathVariable String groupTaskId) {
+        return ResponseEntity.ok(configFacade.getApplyGroupStatus(groupTaskId));
+    }
+
     /** Шаблоны, привязанные к конкретному устройству. */
     @GetMapping("/devices/{deviceId}/templates")
     public ResponseEntity<List<TemplateAssignmentResponse>> getDeviceTemplates(@PathVariable Long deviceId) {
