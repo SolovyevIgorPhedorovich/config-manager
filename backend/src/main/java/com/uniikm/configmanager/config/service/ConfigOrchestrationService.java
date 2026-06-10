@@ -153,14 +153,27 @@ public class ConfigOrchestrationService {
         JsonNode config = version.getConfigData();
 
         // Генерируем команду в зависимости от типа устройства (для ПК — по ОС).
-        String command = switch (device.getType()) {
-            case PC      -> device.isWindows()
-                                ? windowsCommandGenerator.generateCommand(config)
-                                : linuxCommandGenerator.generateCommand(config);
-            case CISCO   -> ciscoCommandGenerator.generateCommand(config);
-            case PROXMOX -> proxmoxCommandGenerator.generateCommand(config);
-            case МФУ     -> mfuCommandGenerator.generateCommand(config);
-        };
+        // Для Linux/Proxmox команды требуют root — оборачиваем в подъём привилегий
+        // через sudo с тем же паролем, что и для SSH-входа.
+        String command;
+        boolean elevate = false;
+        switch (device.getType()) {
+            case PC -> {
+                if (device.isWindows()) {
+                    command = windowsCommandGenerator.generateCommand(config);
+                } else {
+                    command = linuxCommandGenerator.generateCommand(config);
+                    elevate = true;
+                }
+            }
+            case CISCO   -> command = ciscoCommandGenerator.generateCommand(config);
+            case PROXMOX -> { command = proxmoxCommandGenerator.generateCommand(config); elevate = true; }
+            case МФУ     -> command = mfuCommandGenerator.generateCommand(config);
+            default      -> throw new IllegalStateException("Неизвестный тип устройства: " + device.getType());
+        }
+        if (elevate) {
+            command = wrapWithSudo(command, creds.getPassword());
+        }
 
         DeviceCommandTarget target = buildDeviceCommandTarget(device, creds);
 
@@ -189,6 +202,39 @@ public class ConfigOrchestrationService {
         ));
 
         return groupTaskId;
+    }
+
+    /**
+     * Оборачивает bash-скрипт в подъём привилегий. Скрипт пишется во временный
+     * файл (через quoted-heredoc, чтобы переменные внутри — {@code $CON}, {@code $PM},
+     * {@code ${NODE_VER}} — раскрывал bash при выполнении, а не внешняя оболочка),
+     * затем запускается под root:
+     * <ul>
+     *   <li>уже root (типично для Proxmox) — {@code bash <file>};</li>
+     *   <li>иначе — {@code sudo -S -p '' bash <file>}, пароль sudo (тот же, что и
+     *       для SSH-входа) подаётся в stdin sudo. Файл — это аргумент, поэтому
+     *       конфликта между stdin sudo и содержимым скрипта нет.</li>
+     * </ul>
+     * Код возврата проксируется наружу, чтобы интерфейс видел реальный результат.
+     */
+    private String wrapWithSudo(String script, String password) {
+        String pass = shellSingleQuote(password == null ? "" : password);
+        return "__CFG_FILE__=$(mktemp)\n"
+             + "cat > \"$__CFG_FILE__\" <<'__CFG_EOF__'\n"
+             + script
+             + "\n__CFG_EOF__\n"
+             + "if [ \"$(id -u)\" -eq 0 ]; then\n"
+             + "  bash \"$__CFG_FILE__\"; __CFG_RC__=$?\n"
+             + "else\n"
+             + "  echo " + pass + " | sudo -S -p '' bash \"$__CFG_FILE__\"; __CFG_RC__=$?\n"
+             + "fi\n"
+             + "rm -f \"$__CFG_FILE__\"\n"
+             + "exit $__CFG_RC__\n";
+    }
+
+    /** Безопасно заключает значение в одинарные кавычки для bash. */
+    private String shellSingleQuote(String value) {
+        return "'" + value.replace("'", "'\\''") + "'";
     }
 
     private String primaryIp(DeviceInfo device) {

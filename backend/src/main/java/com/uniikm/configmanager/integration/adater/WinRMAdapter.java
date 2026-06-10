@@ -78,27 +78,37 @@ public class WinRMAdapter implements ProtocolAdapter {
                 result.put("exitCode", cmdResult.getStatusCode());
                 result.put("success", cmdResult.getStatusCode() == 0);
 
-                executor.executeCommand(
-                    "echo OK",
-                    null,
-                    StandardCharsets.UTF_8,
-                    5000
-                );
-                
             } catch (WinRMException e) {
                 result.put("success", false);
-                result.put("error", "WinRM execution error: " + e.getMessage());
+                result.put("error", describeFailure(e));
                 this.connected = false;
             } catch (TimeoutException e) {
                 result.put("success", false);
                 result.put("error", "Command execution timed out after " + timeoutMs + " ms.");
             } catch (WindowsRemoteException e) {
-               result.put("success", false);
-                e.printStackTrace();
+                result.put("success", false);
+                result.put("error", describeFailure(e));
+                this.connected = false;
             }
-            
+
             return result;
         });
+    }
+
+    /**
+     * Превращает низкоуровневую ошибку WinRM в понятное сообщение. «Authorization
+     * loop detected» означает, что хост отклонил NTLM-аутентификацию: сервер
+     * повторно отвечает 401, и CXF останавливает цикл повторов. Почти всегда это
+     * неверные логин/пароль либо у учётной записи нет прав на WinRM.
+     */
+    private String describeFailure(Exception e) {
+        String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+        if (msg.contains("Authorization loop")) {
+            return "WinRM отклонил аутентификацию (" + username + "@" + host + ":" + port + "). "
+                 + "Проверьте логин/пароль и что учётной записи разрешён доступ к WinRM "
+                 + "(локальная учётка: имя без домена; доменная: DOMAIN\\user). Исходная ошибка: " + msg;
+        }
+        return "WinRM execution error: " + msg;
     }
 
     @Override
