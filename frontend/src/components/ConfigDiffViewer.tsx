@@ -124,6 +124,15 @@ const STATUS_TAG: Record<DiffStatus, { color: string; label: string }> = {
   'right-only': { color: 'success',  label: '+'  },
 };
 
+// Цвет текста ключа в колонке «КЛЮЧ / ДЕЙСТВИЕ» — подсвечивается по статусу,
+// как и значения: оранжевый — изменено, красный — удалено, зелёный — добавлено.
+const KEY_TEXT: Record<DiffStatus, string> = {
+  unchanged:    '#434343',
+  changed:      '#d46b08',
+  'left-only':  '#a61d24',
+  'right-only': '#237804',
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Компонент
 // ─────────────────────────────────────────────────────────────────────────────
@@ -232,12 +241,12 @@ export default function ConfigDiffViewer({
         </div>
       </div>
 
-      {/* ── Заголовки панелей ── */}
+      {/* ── Заголовки панелей (ключи слева) ── */}
       <div style={{ display: 'flex', borderBottom: '2px solid #e0e0e0', marginBottom: 0 }}>
-        <div style={headerStyle('#f3f3f3')}>{leftLabel}</div>
-        <div style={{ width: 180, background: '#fafafa', borderLeft: '1px solid #e0e0e0', borderRight: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 220, flexShrink: 0, background: '#fafafa', borderRight: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 10px' }}>
           <Text style={{ fontSize: 11, color: '#8c8c8c' }}>КЛЮЧ / ДЕЙСТВИЕ</Text>
         </div>
+        <div style={headerStyle('#f3f3f3')}>{leftLabel}</div>
         <div style={headerStyle('#f3f3f3')}>{rightLabel}</div>
       </div>
 
@@ -271,19 +280,11 @@ export default function ConfigDiffViewer({
               borderBottom: idx < visibleRows.length - 1 ? '1px solid #f0f0f0' : 'none',
               minHeight: 32,
             }}>
-              {/* ── Левая панель (предыдущая) ── */}
-              <div style={{ flex: 1, background: leftBg, padding: '4px 10px', display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-                {row.hasLeft
-                  ? <span style={{ color: leftClr, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayValue(row.leftValue)}</span>
-                  : <span style={{ color: '#bfbfbf', fontStyle: 'italic' }}>—</span>
-                }
-              </div>
-
-              {/* ── Центральная колонка: ключ + стрелки ── */}
+              {/* ── Колонка ключа + стрелки (слева) ── */}
               <div style={{
-                width: 180, flexShrink: 0,
+                width: 220, flexShrink: 0,
                 background: '#fafafa',
-                borderLeft: '1px solid #e8e8e8', borderRight: '1px solid #e8e8e8',
+                borderRight: '1px solid #e8e8e8',
                 display: 'flex', alignItems: 'center', gap: 4, padding: '2px 6px',
                 overflow: 'hidden',
               }}>
@@ -292,9 +293,13 @@ export default function ConfigDiffViewer({
                   {tag.label}
                 </Tag>
 
-                {/* Имя ключа */}
+                {/* Имя ключа — цвет по статусу изменения */}
                 <Tooltip title={row.key}>
-                  <Text style={{ fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#434343' }}>
+                  <Text style={{
+                    fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    color: overridden ? '#8a6d00' : KEY_TEXT[row.status],
+                    fontWeight: row.status === 'unchanged' ? 400 : 600,
+                  }}>
                     {row.key}
                   </Text>
                 </Tooltip>
@@ -322,6 +327,14 @@ export default function ConfigDiffViewer({
                     </Tooltip>
                   </Space>
                 )}
+              </div>
+
+              {/* ── Левая панель (предыдущая) ── */}
+              <div style={{ flex: 1, background: leftBg, padding: '4px 10px', display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+                {row.hasLeft
+                  ? <span style={{ color: leftClr, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayValue(row.leftValue)}</span>
+                  : <span style={{ color: '#bfbfbf', fontStyle: 'italic' }}>—</span>
+                }
               </div>
 
               {/* ── Правая панель (текущая / proposed) ── */}
