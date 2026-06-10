@@ -241,12 +241,15 @@ export default function ConfigDiffViewer({
         </div>
       </div>
 
-      {/* ── Заголовки панелей (ключи слева) ── */}
+      {/* ── Заголовки панелей: ключ слева, действие по центру ── */}
       <div style={{ display: 'flex', borderBottom: '2px solid #e0e0e0', marginBottom: 0 }}>
-        <div style={{ width: 220, flexShrink: 0, background: '#fafafa', borderRight: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 10px' }}>
-          <Text style={{ fontSize: 11, color: '#8c8c8c' }}>КЛЮЧ / ДЕЙСТВИЕ</Text>
+        <div style={{ width: 200, flexShrink: 0, background: '#fafafa', borderRight: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', padding: '6px 10px' }}>
+          <Text style={{ fontSize: 11, color: '#8c8c8c' }}>КЛЮЧ</Text>
         </div>
         <div style={headerStyle('#f3f3f3')}>{leftLabel}</div>
+        <div style={{ width: 84, flexShrink: 0, background: '#fafafa', borderLeft: '1px solid #e0e0e0', borderRight: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 4px' }}>
+          <Text style={{ fontSize: 11, color: '#8c8c8c' }}>ДЕЙСТВИЕ</Text>
+        </div>
         <div style={headerStyle('#f3f3f3')}>{rightLabel}</div>
       </div>
 
@@ -280,9 +283,9 @@ export default function ConfigDiffViewer({
               borderBottom: idx < visibleRows.length - 1 ? '1px solid #f0f0f0' : 'none',
               minHeight: 32,
             }}>
-              {/* ── Колонка ключа + стрелки (слева) ── */}
+              {/* ── Колонка ключа (слева) ── */}
               <div style={{
-                width: 220, flexShrink: 0,
+                width: 200, flexShrink: 0,
                 background: '#fafafa',
                 borderRight: '1px solid #e8e8e8',
                 display: 'flex', alignItems: 'center', gap: 4, padding: '2px 6px',
@@ -303,8 +306,23 @@ export default function ConfigDiffViewer({
                     {row.key}
                   </Text>
                 </Tooltip>
+              </div>
 
-                {/* Кнопки принятия */}
+              {/* ── Левая панель (предыдущая) ── */}
+              <div style={{ flex: 1, background: leftBg, padding: '4px 10px', display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+                {row.hasLeft
+                  ? <span style={{ color: leftClr, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayValue(row.leftValue)}</span>
+                  : <span style={{ color: '#bfbfbf', fontStyle: 'italic' }}>—</span>
+                }
+              </div>
+
+              {/* ── Центральная колонка: действие (стрелки) ── */}
+              <div style={{
+                width: 84, flexShrink: 0,
+                background: '#fafafa',
+                borderLeft: '1px solid #e8e8e8', borderRight: '1px solid #e8e8e8',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '2px 4px',
+              }}>
                 {row.status !== 'unchanged' && (
                   <Space size={2} style={{ flexShrink: 0 }}>
                     {/* ← Принять предыдущее / отменить добавление */}
@@ -327,14 +345,6 @@ export default function ConfigDiffViewer({
                     </Tooltip>
                   </Space>
                 )}
-              </div>
-
-              {/* ── Левая панель (предыдущая) ── */}
-              <div style={{ flex: 1, background: leftBg, padding: '4px 10px', display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-                {row.hasLeft
-                  ? <span style={{ color: leftClr, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayValue(row.leftValue)}</span>
-                  : <span style={{ color: '#bfbfbf', fontStyle: 'italic' }}>—</span>
-                }
               </div>
 
               {/* ── Правая панель (текущая / proposed) ── */}

@@ -90,6 +90,8 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [compareVersionId, setCompareVersionId] = useState<number>();
   const [deleting, setDeleting] = useState(false);
   const [activeTabKey, setActiveTabKey] = useState<string>('devices');
+  // Активная вкладка внутри карточки устройства (current/history/compare/templates)
+  const [deviceTab, setDeviceTab] = useState<string>('current');
 
   // Журнал событий устройств текущей вкладки
   const [deviceLogs, setDeviceLogs] = useState<EventLog[]>([]);
@@ -219,6 +221,7 @@ export default function DevicesPage({ type }: { type?: string }) {
 
   const handleViewConfig = async (device: Device) => {
     setSelectedDevice(device);
+    setDeviceTab('current');
     await loadConfigVersions(device.id!);
     setActiveTabKey('config');
   };
@@ -630,6 +633,8 @@ const handleBulkDelete = async () => {
       extra={<Button onClick={() => setSelectedDevice(null)}>Назад к списку</Button>}
     >
       <Tabs
+        activeKey={deviceTab}
+        onChange={setDeviceTab}
         items={[
           {
             key: 'current',
@@ -662,7 +667,7 @@ const handleBulkDelete = async () => {
                       render: (_, rec) => (
                         <Button
                           type={rec.id === selectedConfigVersionId ? 'primary' : 'default'}
-                          onClick={() => { setCompareVersionId(rec.id); setActiveTabKey('compare'); }}
+                          onClick={() => { setCompareVersionId(rec.id); setDeviceTab('compare'); }}
                         >
                           Сравнить
                         </Button>
