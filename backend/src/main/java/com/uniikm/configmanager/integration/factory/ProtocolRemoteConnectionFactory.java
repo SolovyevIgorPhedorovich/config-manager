@@ -5,7 +5,7 @@ import com.uniikm.configmanager.common.terminal.RemoteConnectionFactory;
 import com.uniikm.configmanager.common.terminal.SshShellConnection;
 import com.uniikm.configmanager.common.dto.ConnectionProtocol;
 import com.uniikm.configmanager.common.dto.DeviceCommandTarget;
-import com.uniikm.configmanager.integration.adater.ProtocolAdapter;
+import com.uniikm.configmanager.integration.adapter.ProtocolAdapter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;

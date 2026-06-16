@@ -1,4 +1,4 @@
-package com.uniikm.configmanager.integration.adater;
+package com.uniikm.configmanager.integration.adapter;
 
 import java.util.HashMap;
 import java.util.Map;

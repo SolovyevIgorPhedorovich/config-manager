@@ -10,11 +10,18 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import java.util.Collection;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
+
 import com.uniikm.configmanager.audit.enums.AuditAction;
 import com.uniikm.configmanager.auth.dto.LoginRequest;
 import com.uniikm.configmanager.auth.dto.LoginResponse;
 import com.uniikm.configmanager.auth.dto.mapper.AuthMapper;
-import com.uniikm.configmanager.auth.events.AuthEvent;
+import com.uniikm.configmanager.auth.event.AuthEvent;
+import com.uniikm.configmanager.auth.model.User;
+import com.uniikm.configmanager.auth.repository.UserRepository;
 import com.uniikm.configmanager.auth.service.JwtService;
 import com.uniikm.configmanager.auth.service.TokenBlacklistService;
 
@@ -28,6 +35,7 @@ public class AuthFacadeImpl implements AuthFacade {
     private final AuthMapper authMapper;
     private final TokenBlacklistService blacklist;
     private final ApplicationEventPublisher eventPublisher;
+    private final UserRepository userRepository;
 
     @Override
     public LoginResponse login(LoginRequest request) {
@@ -108,5 +116,18 @@ public class AuthFacadeImpl implements AuthFacade {
             throw new RuntimeException("Unauthorized");
         }
         return authentication.getName();
+    }
+
+    @Override
+    public Map<Long, String> getUsernames(Collection<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Map.of();
+        }
+        java.util.List<Long> ids = userIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return userRepository.findAllById(ids).stream()
+                .collect(Collectors.toMap(User::getId, User::getUsername, (a, b) -> a));
     }
 }

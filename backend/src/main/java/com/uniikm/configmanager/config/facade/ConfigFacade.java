@@ -11,6 +11,7 @@ import com.uniikm.configmanager.config.dto.ConfigCompareRequest;
 import com.uniikm.configmanager.config.dto.ConfigCompareResponse;
 import com.uniikm.configmanager.config.dto.ConfigHistoryResponse;
 import com.uniikm.configmanager.config.dto.ConfigStatusResponse;
+import com.uniikm.configmanager.integration.dto.DeviceProbeResult;
 
 public interface ConfigFacade {
 
@@ -24,4 +25,11 @@ public interface ConfigFacade {
 
     /** Фактический статус применения одной группы задач (config:apply:&lt;groupTaskId&gt;). */
     ConfigStatusResponse getApplyGroupStatus(String groupTaskId);
+
+    /**
+     * Захват фактической конфигурации устройства по результату зондирования и
+     * сверка с сохранённой активной версией (фиксация расхождения — drift).
+     * Контракт для модуля устройств, вызывается после сканирования сети.
+     */
+    void captureAndReconcile(Long deviceId, DeviceProbeResult probe);
 }

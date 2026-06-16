@@ -1,24 +1,42 @@
 server:
   port: ${SERVER_PORT:8080}
+  # TLS терминируется на nginx (reverse proxy). Бэкенд слушает обычный HTTP
+  # и только на localhost, чтобы 8080 не торчал наружу открытым текстом.
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  # За nginx: восстанавливать scheme/host/port из X-Forwarded-* (https/443),
+  # иначе бэкенд считает запрос http://...:8080 и ломает CORS/редиректы.
+  forward-headers-strategy: framework
+  ssl:
+    # По умолчанию выключено (TLS делает nginx). Можно включить для деплоя без
+    # внешнего прокси: SSL_ENABLED=true + keystore (backend/generate-keystore.sh
+    # или свой через SSL_KEYSTORE/SSL_KEYSTORE_PASSWORD).
+    enabled: ${SSL_ENABLED:false}
+    key-store: ${SSL_KEYSTORE:classpath:keystore.p12}
+    key-store-password: ${SSL_KEYSTORE_PASSWORD:changeit}
+    key-store-type: PKCS12
+    key-alias: ${SSL_KEY_ALIAS:configmanager}
 
 spring:
+  # Активный профиль среды: dev (локальная разработка) по умолчанию, prod — для
+  # развёртывания. Конкретные параметры БД задаются в application-{profile}.yml.
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
   application:
     name: "configmanager"
   datasource:
-    # Параметры подключения переопределяются переменными окружения
-    # (DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD); значения по умолчанию —
-    # для локальной разработки.
+    # Общие параметры. Хост/имя БД/пользователь берутся из окружения
+    # (DB_HOST/DB_PORT/DB_NAME/DB_USER), ПАРОЛЬ в базовом файле не хранится —
+    # он задаётся в профиле среды (dev) или через DB_PASSWORD (prod).
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:mydatabase}
     driver-class-name: org.postgresql.Driver
     username: ${DB_USER:igor}
-    password: ${DB_PASSWORD:8008}
+    password: ${DB_PASSWORD:}
   sql:
     init:
       mode: always
   jpa:
     hibernate:
       ddl-auto: none
-    show-sql: true
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
@@ -45,6 +63,12 @@ management:
     ldap:
       enabled: false
 
+app:
+  cors:
+    # Разрешённые источники для CORS (через запятую). По умолчанию — dev-порты
+    # фронта и боевой адрес. В проде переопределяйте через CORS_ALLOWED_ORIGINS.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:4173,http://localhost:4174,https://132.243.122.88}
+
 network-scan:
   redis-key-prefix: network-scan
   result-ttl: PT5M
@@ -58,15 +82,9 @@ network-scan:
 
 logging:
   level:
-    com.example.configmanager: INFO
-    org.hibernate.SQL: DEBUG
-    org.springframework.security: TRACE
-    # Подробные логи сканирования сети (доступность, опрос, добавление устройств)
-    com.uniikm.configmanager.device.service.NetworkScannerService: DEBUG
-    com.uniikm.configmanager.integration.service.NetworkProbeService: DEBUG
-    # Передача данных в WebSocket-терминале: DEBUG — направление/размер,
-    # TRACE — содержимое (нажатия/вывод). Поставь TRACE, чтобы видеть данные.
-    com.uniikm.configmanager.device.websocket.TerminalWebSocketHandler: DEBUG
+    # Базовый уровень. Подробное логирование (SQL/Security/сканирование) — в
+    # профиле dev (application-dev.yml); в проде уровни ужесточаются (prod).
+    com.uniikm.configmanager: INFO
 
 remote-command:
   redis-key-prefix: remote-command

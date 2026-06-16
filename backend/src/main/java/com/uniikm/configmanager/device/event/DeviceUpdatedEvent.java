@@ -1,4 +1,4 @@
-package com.uniikm.configmanager.device.events;
+package com.uniikm.configmanager.device.event;
 
 import com.uniikm.configmanager.device.model.DeviceInfo;
 

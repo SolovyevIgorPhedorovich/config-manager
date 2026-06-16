@@ -7,9 +7,9 @@ import com.uniikm.configmanager.config.enums.ScheduledApplyStatus;
 import com.uniikm.configmanager.config.model.ConfigVersion;
 import com.uniikm.configmanager.config.model.ScheduledConfigApply;
 import com.uniikm.configmanager.config.repository.ScheduledConfigApplyRepository;
+import com.uniikm.configmanager.device.facade.DeviceFacade;
 import com.uniikm.configmanager.device.model.DeviceInfo;
-import com.uniikm.configmanager.device.repository.DeviceRepository;
-import com.uniikm.configmanager.integration.service.NetworkProbeService;
+import com.uniikm.configmanager.integration.facade.IntegrationFacade;
 
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -40,8 +40,8 @@ public class ScheduledConfigApplyService {
 
     private final ScheduledConfigApplyRepository repository;
     private final SecretCipher cipher;
-    private final NetworkProbeService probeService;
-    private final DeviceRepository deviceRepository;
+    private final IntegrationFacade integrationFacade;
+    private final DeviceFacade deviceFacade;
     private final ConfigVersionService configVersionService;
     private final ConfigOrchestrationService orchestrationService;
     private final TaskScheduler scanTaskScheduler;
@@ -112,7 +112,7 @@ public class ScheduledConfigApplyService {
         if (entry == null || entry.getStatus() != ScheduledApplyStatus.PENDING) return;
 
         try {
-            DeviceInfo device = deviceRepository.findById(entry.getDeviceId()).orElse(null);
+            DeviceInfo device = deviceFacade.findDeviceEntity(entry.getDeviceId()).orElse(null);
             if (device == null) {
                 log.warn("Заявка {}: устройство {} не найдено — помечаю FAILED", entry.getId(), entry.getDeviceId());
                 entry.setStatus(ScheduledApplyStatus.FAILED);
@@ -122,7 +122,7 @@ public class ScheduledConfigApplyService {
             }
 
             String ip = device.getIps().isEmpty() ? device.getHostname() : device.getIps().get(0).getIp();
-            if (!probeService.isReachable(ip)) {
+            if (!integrationFacade.isReachable(ip)) {
                 // Всё ещё офлайн — недоступность не считается неудачной попыткой, ждём дальше.
                 return;
             }
@@ -177,7 +177,7 @@ public class ScheduledConfigApplyService {
     }
 
     private ScheduledApplyResponse toResponse(ScheduledConfigApply e) {
-        String hostname = deviceRepository.findById(e.getDeviceId())
+        String hostname = deviceFacade.findDeviceEntity(e.getDeviceId())
                 .map(DeviceInfo::getHostname).orElse(null);
         return new ScheduledApplyResponse(
                 e.getId(), e.getDeviceId(), hostname, e.getConfigVersionId(),

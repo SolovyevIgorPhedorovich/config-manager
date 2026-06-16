@@ -10,7 +10,7 @@ import type { ConfigVersion, Device, EventLog } from '../types';
 import { eventActionLabel, eventResult, eventResultColor } from '../utils/eventLabels';
 import { getErrorMessage } from '../utils/errorMessage';
 import SSHClient from '../components/DeviceTerminal';
-import { ArrowRightOutlined, CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined, WarningOutlined, ClockCircleOutlined } from "@ant-design/icons"
+import { ArrowRightOutlined, CodeOutlined, ScanOutlined, PlusCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, FileDoneOutlined, FileSearchOutlined, EditOutlined, WarningOutlined, ClockCircleOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined } from "@ant-design/icons"
 import { ScanDeviceModal } from '../components/ScanDeviceModal';
 import { AddDeviceModal } from '../components/AddDeviceModal';
 import { ScanProgress } from '../components/ScanProgress';
@@ -97,8 +97,10 @@ export default function DevicesPage({ type }: { type?: string }) {
   const [deviceLogs, setDeviceLogs] = useState<EventLog[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
 
-  // id устройства, для которого идёт инвентаризация
-  const [inventoryLoadingId, setInventoryLoadingId] = useState<number | null>(null);
+  // Статус получения данных (инвентаризации) по устройству — для колонки «Выполнение»
+  const [inventoryStatus, setInventoryStatus] = useState<Record<number, 'running' | 'success' | 'error'>>({});
+  // Идёт массовое получение данных по выбранным устройствам
+  const [bulkInventoryRunning, setBulkInventoryRunning] = useState(false);
 
   // Реальная доступность устройств (ping) и счётчики отложенного применения
   const [statuses, setStatuses] = useState<Record<number, boolean>>({});
@@ -361,9 +363,6 @@ const handleBulkDelete = async () => {
   const statusText = (status: DeviceRuntimeStatus) =>
     status === 'online' ? 'Онлайн' : status === 'offline' ? 'Оффлайн' : status === 'checking' ? 'Проверка…' : 'Ошибка';
 
-  // Прогресс применения – получаем из API по deviceId (можно добавить эндпоинт)
-  const getActionProgress = (device: Device) => 0; // пока заглушка
-
   // Обновленные колонки таблицы с отображением ОС и производителя
   const deviceColumns: ColumnsType<Device> = [
     { title: 'IP-адрес', key: 'ip', render: (_, record) => record.ips?.[0] || '—' },
@@ -453,12 +452,17 @@ const handleBulkDelete = async () => {
       title: 'Выполнение',
       key: 'progress',
       render: (_, record) => {
-        const progress = getActionProgress(record);
-        return progress > 0 ? (
-          <Progress type="circle" size={44} percent={progress} status={progress >= 100 ? 'success' : 'normal'} />
-        ) : (
-          <Text type="secondary">—</Text>
-        );
+        const st = record.id != null ? inventoryStatus[record.id] : undefined;
+        if (st === 'running') {
+          return <Tag icon={<SyncOutlined spin />} color="processing">Опрос…</Tag>;
+        }
+        if (st === 'success') {
+          return <Tag icon={<CheckCircleOutlined />} color="success">Получено</Tag>;
+        }
+        if (st === 'error') {
+          return <Tag icon={<CloseCircleOutlined />} color="error">Ошибка</Tag>;
+        }
+        return <Text type="secondary">—</Text>;
       },
     },
     {
@@ -478,7 +482,7 @@ const handleBulkDelete = async () => {
           <Tooltip title="Инвентаризация">
             <Button
               icon={<ScanOutlined />}
-              loading={inventoryLoadingId === record.id}
+              loading={record.id != null && inventoryStatus[record.id] === 'running'}
               onClick={() => handleInventory(record)}
             />
           </Tooltip>
@@ -812,9 +816,32 @@ const handleBulkDelete = async () => {
     message.info('Выберите устройство из списка');
   };
 
+  // Получение данных с одного устройства. Обновляет статус в колонке «Выполнение»
+  // и сами данные устройства; возвращает успех/неуспех опроса.
+  const runInventory = async (device: Device): Promise<boolean> => {
+    if (!device.id) return false;
+    const id = device.id;
+    setInventoryStatus((prev) => ({ ...prev, [id]: 'running' }));
+    try {
+      const res = await devicesApi.inventory(id);
+      if (res.success) {
+        if (res.device) {
+          setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...res.device } : d)));
+          setSelectedDevice((prev) => (prev?.id === id ? { ...prev, ...res.device } as Device : prev));
+        }
+        setInventoryStatus((prev) => ({ ...prev, [id]: 'success' }));
+        return true;
+      }
+      setInventoryStatus((prev) => ({ ...prev, [id]: 'error' }));
+      return false;
+    } catch {
+      setInventoryStatus((prev) => ({ ...prev, [id]: 'error' }));
+      return false;
+    }
+  };
+
   const handleInventory = async (device: Device) => {
     if (!device.id) return;
-    setInventoryLoadingId(device.id);
     message.loading({ content: `Инвентаризация ${device.hostname}...`, key: 'inventory', duration: 0 });
     try {
       const res = await devicesApi.inventory(device.id);
@@ -823,6 +850,7 @@ const handleBulkDelete = async () => {
           setDevices((prev) => prev.map((d) => (d.id === device.id ? { ...d, ...res.device } : d)));
           setSelectedDevice((prev) => (prev?.id === device.id ? { ...prev, ...res.device } as Device : prev));
         }
+        setInventoryStatus((prev) => ({ ...prev, [device.id!]: 'success' }));
         message.success({
           content: res.updated
             ? `Данные обновлены (${res.detectionMethod ?? 'опрос'})`
@@ -830,16 +858,51 @@ const handleBulkDelete = async () => {
           key: 'inventory',
         });
       } else {
+        setInventoryStatus((prev) => ({ ...prev, [device.id!]: 'error' }));
         message.warning({ content: res.message || 'Устройство не ответило на опрос', key: 'inventory' });
       }
     } catch (err: any) {
+      setInventoryStatus((prev) => ({ ...prev, [device.id!]: 'error' }));
       message.error({
         content: `Ошибка инвентаризации: ${err.response?.data?.message || err.message}`,
         key: 'inventory',
       });
-    } finally {
-      setInventoryLoadingId(null);
     }
+  };
+
+  // Массовое получение данных по выбранным устройствам (пул с ограничением параллелизма).
+  const handleBulkInventory = async () => {
+    const ids = selectedDeviceIds.map(Number).filter((n) => !Number.isNaN(n));
+    const targets = devices.filter((d) => d.id != null && ids.includes(d.id));
+    if (targets.length === 0) return;
+
+    setBulkInventoryRunning(true);
+    let done = 0;
+    let ok = 0;
+    const total = targets.length;
+    message.loading({ content: `Получение данных: 0/${total}…`, key: 'bulk-inv', duration: 0 });
+
+    const queue = [...targets];
+    const worker = async () => {
+      while (queue.length > 0) {
+        const device = queue.shift();
+        if (!device) break;
+        const success = await runInventory(device);
+        done += 1;
+        if (success) ok += 1;
+        message.loading({ content: `Получение данных: ${done}/${total}…`, key: 'bulk-inv', duration: 0 });
+      }
+    };
+    const concurrency = Math.min(5, targets.length);
+    await Promise.all(Array.from({ length: concurrency }, worker));
+
+    const failed = total - ok;
+    if (failed === 0) {
+      message.success({ content: `Данные получены: ${ok}/${total}`, key: 'bulk-inv' });
+    } else {
+      message.warning({ content: `Готово: успешно ${ok}/${total}, с ошибкой ${failed}`, key: 'bulk-inv' });
+    }
+    setBulkInventoryRunning(false);
   };
 
   const handleScan = async (options: any) => {
@@ -952,8 +1015,16 @@ const handleBulkDelete = async () => {
                     >
                       Удалить выбранные
                     </Button>
+                    <Button
+                      disabled={selectedDeviceIds.length === 0 || bulkInventoryRunning}
+                      loading={bulkInventoryRunning}
+                      icon={<ScanOutlined />}
+                      onClick={handleBulkInventory}
+                    >
+                      Получить данные
+                    </Button>
                     <Button disabled={selectedDeviceIds.length === 0} icon={<FileDoneOutlined />} type="primary" onClick={() => message.info('Массовое применение в разработке')}>Применить настройки</Button>
-                    <Button disabled={selectedDeviceIds.length === 0} onClick={() => setSelectedDeviceIds([])}>Сбросить выбор</Button>
+                    <Button disabled={selectedDeviceIds.length === 0 || bulkInventoryRunning} onClick={() => setSelectedDeviceIds([])}>Сбросить выбор</Button>
                   </Space>
                   <Table
                     rowKey="id"

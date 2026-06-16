@@ -5,10 +5,10 @@ import org.springframework.stereotype.Component;
 
 import com.uniikm.configmanager.common.dto.ConnectionProtocol;
 import com.uniikm.configmanager.common.dto.DeviceCommandTarget;
-import com.uniikm.configmanager.integration.adater.ProtocolAdapter;
-import com.uniikm.configmanager.integration.adater.SNMPAdapter;
-import com.uniikm.configmanager.integration.adater.SSHAdapter;
-import com.uniikm.configmanager.integration.adater.WinRMAdapter;
+import com.uniikm.configmanager.integration.adapter.ProtocolAdapter;
+import com.uniikm.configmanager.integration.adapter.SNMPAdapter;
+import com.uniikm.configmanager.integration.adapter.SSHAdapter;
+import com.uniikm.configmanager.integration.adapter.WinRMAdapter;
 import com.uniikm.configmanager.integration.client.SnmpClient;
 
 @Component

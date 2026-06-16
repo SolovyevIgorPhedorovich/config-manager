@@ -12,7 +12,6 @@ import com.uniikm.configmanager.auth.facade.AuthFacade;
 
 @RestController
 @RequestMapping("/api/v1/auth")
-@CrossOrigin(origins = "*")
 @RequiredArgsConstructor
 public class AuthController {
 

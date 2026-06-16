@@ -6,6 +6,8 @@ services:
     ports:
       - "8080:8080"
     environment:
+      # Профиль среды: prod (БД из env, без секретов в коде) + ad (доменная аутентификация).
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod,ad}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-config_manager}
@@ -13,6 +15,17 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-cms_password}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      # Ключ шифрования секретов в БД (Base64, 16/24/32 байта). В проде ЗАДАЙТЕ свой,
+      # иначе используется небезопасный dev-ключ по умолчанию.
+      SECURITY_ENCRYPTION_KEY: ${SECURITY_ENCRYPTION_KEY:-}
+      # Первичная инициализация настроек AD/LDAP (создаются в БД при первом старте,
+      # далее редактируются через интерфейс). Пароль хранится в БД зашифрованным.
+      AD_ENABLED: ${AD_ENABLED:-false}
+      AD_URL: ${AD_URL:-ldap://dc.company.local:389}
+      AD_BASE: ${AD_BASE:-DC=company,DC=local}
+      AD_USER_DN: ${AD_USER_DN:-}
+      AD_PASSWORD: ${AD_PASSWORD:-}
+      AD_USER_SEARCH_FILTER: ${AD_USER_SEARCH_FILTER:-(sAMAccountName={0})}
     depends_on:
       postgres:
         condition: service_healthy

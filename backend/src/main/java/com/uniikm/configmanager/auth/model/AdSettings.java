@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.Data;
+import lombok.ToString;
 
 import java.time.LocalDateTime;
 
@@ -35,6 +36,7 @@ public class AdSettings {
 
     /** Пароль bind-учётки (хранится в БД; шифрование — направление развития). */
     @Column(name = "password")
+    @ToString.Exclude
     private String password;
 
     @Column(name = "user_search_filter", nullable = false)

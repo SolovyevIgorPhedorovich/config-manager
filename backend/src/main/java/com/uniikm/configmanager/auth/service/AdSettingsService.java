@@ -16,6 +16,7 @@ import com.uniikm.configmanager.auth.dto.AdSettingsRequest;
 import com.uniikm.configmanager.auth.dto.AdSettingsResponse;
 import com.uniikm.configmanager.auth.model.AdSettings;
 import com.uniikm.configmanager.auth.repository.AdSettingsRepository;
+import com.uniikm.configmanager.common.crypto.SecretCipher;
 
 import lombok.RequiredArgsConstructor;
 
@@ -29,6 +30,7 @@ import lombok.RequiredArgsConstructor;
 public class AdSettingsService {
 
     private final AdSettingsRepository repository;
+    private final SecretCipher cipher;   // шифрование bind-пароля AD в БД
 
     @Value("${ad.enabled:false}")          private boolean defEnabled;
     @Value("${ad.url:ldap://dc.company.local:389}") private String defUrl;
@@ -40,18 +42,25 @@ public class AdSettingsService {
     /** Текущие настройки; при отсутствии — создаются из значений по умолчанию. */
     @Transactional
     public AdSettings current() {
-        return repository.findById(1L).orElseGet(() -> {
-            AdSettings s = new AdSettings();
-            s.setId(1L);
-            s.setEnabled(defEnabled);
-            s.setUrl(defUrl);
-            s.setBaseDn(defBase);
-            s.setUserDn(defUserDn == null || defUserDn.isBlank() ? null : defUserDn);
-            s.setPassword(defPassword == null || defPassword.isBlank() ? null : defPassword);
-            s.setUserSearchFilter(defFilter);
-            s.setUpdatedAt(LocalDateTime.now());
-            return repository.save(s);
+        AdSettings s = repository.findById(1L).orElseGet(() -> {
+            AdSettings n = new AdSettings();
+            n.setId(1L);
+            n.setEnabled(defEnabled);
+            n.setUrl(defUrl);
+            n.setBaseDn(defBase);
+            n.setUserDn(defUserDn == null || defUserDn.isBlank() ? null : defUserDn);
+            // Пароль из env сразу шифруем перед сохранением в БД
+            n.setPassword(cipher.encrypt(defPassword == null || defPassword.isBlank() ? null : defPassword));
+            n.setUserSearchFilter(defFilter);
+            n.setUpdatedAt(LocalDateTime.now());
+            return repository.save(n);
         });
+        // Одноразовая миграция legacy-пароля (plaintext → enc:) при первом обращении
+        if (s.getPassword() != null && !s.getPassword().isBlank() && !cipher.isEncrypted(s.getPassword())) {
+            s.setPassword(cipher.encrypt(s.getPassword()));
+            repository.save(s);
+        }
+        return s;
     }
 
     @Transactional
@@ -62,8 +71,8 @@ public class AdSettingsService {
         if (req.baseDn() != null)        s.setBaseDn(req.baseDn().trim());
         // userDn: пустая строка очищает (анонимный/неуказанный bind)
         if (req.userDn() != null)        s.setUserDn(req.userDn().isBlank() ? null : req.userDn().trim());
-        // password: пустой — оставляем прежний; иначе обновляем
-        if (req.password() != null && !req.password().isBlank()) s.setPassword(req.password());
+        // password: пустой — оставляем прежний; иначе обновляем (шифруем перед записью)
+        if (req.password() != null && !req.password().isBlank()) s.setPassword(cipher.encrypt(req.password()));
         if (req.userSearchFilter() != null && !req.userSearchFilter().isBlank())
             s.setUserSearchFilter(req.userSearchFilter().trim());
         s.setUpdatedAt(LocalDateTime.now());
@@ -112,8 +121,10 @@ public class AdSettingsService {
         if (s.getUserDn() != null && !s.getUserDn().isBlank()) {
             cs.setUserDn(s.getUserDn());
         }
-        if (s.getPassword() != null && !s.getPassword().isBlank()) {
-            cs.setPassword(s.getPassword());
+        // Пароль в БД хранится зашифрованным; decrypt() корректно отдаёт и legacy-plaintext
+        String password = cipher.decrypt(s.getPassword());
+        if (password != null && !password.isBlank()) {
+            cs.setPassword(password);
         }
         Map<String, Object> env = new HashMap<>();
         env.put("com.sun.jndi.ldap.connect.timeout", "3000");

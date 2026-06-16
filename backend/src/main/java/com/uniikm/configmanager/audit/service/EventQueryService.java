@@ -4,7 +4,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -13,8 +12,7 @@ import org.springframework.stereotype.Service;
 import com.uniikm.configmanager.audit.dto.EventLogDto;
 import com.uniikm.configmanager.audit.model.EventLogEntity;
 import com.uniikm.configmanager.audit.repository.AuditLogRepository;
-import com.uniikm.configmanager.auth.model.User;
-import com.uniikm.configmanager.auth.repository.UserRepository;
+import com.uniikm.configmanager.auth.facade.AuthFacade;
 
 import lombok.RequiredArgsConstructor;
 
@@ -25,7 +23,7 @@ public class EventQueryService {
     private static final String DEVICE_AGGREGATE = "DEVICE";
 
     private final AuditLogRepository auditLogRepository;
-    private final UserRepository userRepository;
+    private final AuthFacade authFacade;
 
     /** События одного устройства. */
     public List<EventLogDto> getDeviceLogs(Long deviceId) {
@@ -70,10 +68,6 @@ public class EventQueryService {
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
-        if (userIds.isEmpty()) {
-            return Map.of();
-        }
-        return userRepository.findAllById(userIds).stream()
-                .collect(Collectors.toMap(User::getId, User::getUsername, (a, b) -> a));
+        return authFacade.getUsernames(userIds);
     }
 }

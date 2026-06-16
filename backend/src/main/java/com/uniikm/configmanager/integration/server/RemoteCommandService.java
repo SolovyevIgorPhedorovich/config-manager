@@ -6,7 +6,7 @@ import com.uniikm.configmanager.audit.enums.TaskStatus;
 import com.uniikm.configmanager.common.dto.ConnectionProtocol;
 import com.uniikm.configmanager.common.dto.DeviceCommandTarget;
 import com.uniikm.configmanager.config.event.TaskCompletedEvent;
-import com.uniikm.configmanager.integration.adater.ProtocolAdapter;
+import com.uniikm.configmanager.integration.adapter.ProtocolAdapter;
 import com.uniikm.configmanager.integration.dto.CommandExecutionRequest;
 import com.uniikm.configmanager.integration.dto.CommandGroupStatus;
 import com.uniikm.configmanager.integration.dto.CommandTaskResult;

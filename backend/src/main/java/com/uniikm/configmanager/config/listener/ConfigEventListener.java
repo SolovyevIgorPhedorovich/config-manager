@@ -5,7 +5,7 @@ import com.uniikm.configmanager.audit.enums.AuditAction;
 import com.uniikm.configmanager.config.model.ConfigVersion;
 import com.uniikm.configmanager.config.repository.ConfigVersionRepository;
 import com.uniikm.configmanager.config.service.ConfigVersionService;
-import com.uniikm.configmanager.device.events.DeviceEvent;
+import com.uniikm.configmanager.device.event.DeviceEvent;
 import com.uniikm.configmanager.device.model.DeviceInfo;
 
 import lombok.RequiredArgsConstructor;

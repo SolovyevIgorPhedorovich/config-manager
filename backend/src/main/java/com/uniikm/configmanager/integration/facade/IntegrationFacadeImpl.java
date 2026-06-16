@@ -1,16 +1,13 @@
 package com.uniikm.configmanager.integration.facade;
 
-import java.util.List;
-
 import org.springframework.stereotype.Service;
 
-import com.uniikm.configmanager.common.dto.ConnectionProtocol;
-import com.uniikm.configmanager.common.dto.DeviceCommandTarget;
-import com.uniikm.configmanager.config.dto.DeviceCredentials;
-import com.uniikm.configmanager.device.model.DeviceInfo;
 import com.uniikm.configmanager.integration.dto.CommandExecutionRequest;
 import com.uniikm.configmanager.integration.dto.CommandGroupStatus;
+import com.uniikm.configmanager.integration.dto.DeviceProbeResult;
+import com.uniikm.configmanager.integration.dto.ScanConfig;
 import com.uniikm.configmanager.integration.server.RemoteCommandService;
+import com.uniikm.configmanager.integration.service.NetworkProbeService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -18,52 +15,26 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class IntegrationFacadeImpl implements IntegrationFacade {
 
+    private final NetworkProbeService networkProbeService;
     private final RemoteCommandService remoteCommandService;
 
     @Override
-    public CommandGroupStatus executeConfiguration(
-            DeviceInfo device,
-            DeviceCredentials credentials,
-            String command
-    ) {
-
-        DeviceCommandTarget target = buildTarget(device, credentials);
-
-        CommandExecutionRequest request =
-                new CommandExecutionRequest(
-                        command,
-                        List.of(target),
-                        null,
-                        null
-                );
-
-        return remoteCommandService.executeAsync(request);
+    public int getPingTimeoutMs() {
+        return networkProbeService.getPingTimeoutMs();
     }
 
-    private DeviceCommandTarget buildTarget(
-            DeviceInfo device,
-            DeviceCredentials credentials
-    ) {
+    @Override
+    public boolean isReachable(String ip) {
+        return networkProbeService.isReachable(ip);
+    }
 
-        String ip = device.getIps().isEmpty()
-                ? device.getHostname()
-                : device.getIps().get(0).getIp();
+    @Override
+    public DeviceProbeResult probe(String ip, ScanConfig config) {
+        return networkProbeService.probe(ip, config);
+    }
 
-        ConnectionProtocol protocol = switch (device.getType()) {
-            case PC  -> device.isWindows() ? ConnectionProtocol.WINRM : ConnectionProtocol.SSH;
-            case МФУ -> ConnectionProtocol.SNMP;
-            default  -> ConnectionProtocol.SSH; // CISCO, PROXMOX
-        };
-
-        return new DeviceCommandTarget(
-                ip,
-                credentials.getPort(),
-                credentials.getUsername(),
-                credentials.getPassword(),
-                protocol,
-                null,
-                null,
-                null
-        );
+    @Override
+    public CommandGroupStatus executeAsync(CommandExecutionRequest request) {
+        return remoteCommandService.executeAsync(request);
     }
 }

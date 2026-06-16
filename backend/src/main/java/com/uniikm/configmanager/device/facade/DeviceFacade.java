@@ -2,6 +2,7 @@ package com.uniikm.configmanager.device.facade;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import com.uniikm.configmanager.device.dto.BulkDeleteResponse;
 import com.uniikm.configmanager.device.dto.DeviceRequest;
@@ -12,7 +13,10 @@ public interface DeviceFacade {
 
     List<DeviceResponse> getAll();
 
-    DeviceInfo getDeviceEntity(Long id);   
+    DeviceInfo getDeviceEntity(Long id);
+
+    /** Чтение сущности устройства без исключения: пусто, если не найдено. */
+    Optional<DeviceInfo> findDeviceEntity(Long id);
 
     List<DeviceInfo> getDeviceEntities(List<Long> ids);
 

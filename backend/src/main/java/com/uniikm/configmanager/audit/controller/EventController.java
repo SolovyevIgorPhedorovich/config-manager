@@ -5,7 +5,7 @@ import java.util.List;
 import org.springframework.web.bind.annotation.*;
 
 import com.uniikm.configmanager.audit.dto.EventLogDto;
-import com.uniikm.configmanager.audit.service.EventQueryService;
+import com.uniikm.configmanager.audit.facade.AuditFacade;
 
 import lombok.RequiredArgsConstructor;
 
@@ -14,7 +14,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class EventController {
 
-    private final EventQueryService eventQueryService;
+    private final AuditFacade auditFacade;
 
     @GetMapping("/logs")
     public List<EventLogDto> getLogs(
@@ -24,11 +24,11 @@ public class EventController {
             @RequestParam(defaultValue = "100") int size
     ) {
         if (deviceId != null) {
-            return eventQueryService.getDeviceLogs(deviceId);
+            return auditFacade.getDeviceLogs(deviceId);
         }
         if (deviceIds != null && !deviceIds.isEmpty()) {
-            return eventQueryService.getDeviceLogs(deviceIds);
+            return auditFacade.getDeviceLogs(deviceIds);
         }
-        return eventQueryService.getAllLogs(page, size);
+        return auditFacade.getAllLogs(page, size);
     }
 }

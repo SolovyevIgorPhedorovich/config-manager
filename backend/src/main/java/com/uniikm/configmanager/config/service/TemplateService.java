@@ -15,8 +15,8 @@ import com.uniikm.configmanager.config.model.ConfigTemplate;
 import com.uniikm.configmanager.config.model.TemplateAssignment;
 import com.uniikm.configmanager.config.repository.ConfigTemplateRepository;
 import com.uniikm.configmanager.config.repository.TemplateAssignmentRepository;
+import com.uniikm.configmanager.device.facade.DeviceFacade;
 import com.uniikm.configmanager.device.model.DeviceInfo;
-import com.uniikm.configmanager.device.repository.DeviceRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,7 +36,7 @@ public class TemplateService {
 
     private final ConfigTemplateRepository templateRepo;
     private final TemplateAssignmentRepository assignmentRepo;
-    private final DeviceRepository deviceRepo;
+    private final DeviceFacade deviceFacade;
     private final UserRepository userRepo;
     private final ConfigOrchestrationService orchestrationService;
     private final ObjectMapper objectMapper;
@@ -112,7 +112,7 @@ public class TemplateService {
                 log.debug("Template {} already assigned to device {}, skipping", templateId, deviceId);
                 continue;
             }
-            DeviceInfo device = deviceRepo.findById(deviceId)
+            DeviceInfo device = deviceFacade.findDeviceEntity(deviceId)
                     .orElseThrow(() -> new IllegalArgumentException("Устройство не найдено: " + deviceId));
 
             TemplateAssignment assignment = TemplateAssignment.builder()
@@ -148,7 +148,7 @@ public class TemplateService {
 
     @Transactional(readOnly = true)
     public List<TemplateAssignmentResponse> getDeviceAssignments(Long deviceId) {
-        deviceRepo.findById(deviceId)
+        deviceFacade.findDeviceEntity(deviceId)
                 .orElseThrow(() -> new IllegalArgumentException("Устройство не найдено: " + deviceId));
         return assignmentRepo.findByDeviceId(deviceId).stream()
                 .map(this::toAssignmentResponse)
@@ -164,7 +164,7 @@ public class TemplateService {
 
         List<DeviceInfo> devices;
         if (req.getDeviceIds() != null && !req.getDeviceIds().isEmpty()) {
-            devices = deviceRepo.findAllById(req.getDeviceIds());
+            devices = deviceFacade.getDeviceEntities(req.getDeviceIds());
             if (devices.isEmpty()) {
                 throw new IllegalArgumentException("Ни одно из указанных устройств не найдено");
             }

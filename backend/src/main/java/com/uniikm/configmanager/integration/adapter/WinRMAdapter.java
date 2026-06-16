@@ -1,4 +1,4 @@
-package com.uniikm.configmanager.integration.adater;
+package com.uniikm.configmanager.integration.adapter;
 
 import org.metricshub.winrm.WinRMHttpProtocolEnum;
 import org.metricshub.winrm.WindowsRemoteCommandResult;

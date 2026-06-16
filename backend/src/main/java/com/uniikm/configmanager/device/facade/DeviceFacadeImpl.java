@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -20,7 +21,7 @@ import com.uniikm.configmanager.device.dto.DeviceResponse;
 import com.uniikm.configmanager.device.dto.mapper.DeviceMapper;
 import com.uniikm.configmanager.device.model.DeviceInfo;
 import com.uniikm.configmanager.device.service.DeviceService;
-import com.uniikm.configmanager.integration.service.NetworkProbeService;
+import com.uniikm.configmanager.integration.facade.IntegrationFacade;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,7 +33,7 @@ public class DeviceFacadeImpl implements DeviceFacade {
 
     private final DeviceService deviceService;
     private final DeviceMapper deviceMapper;
-    private final NetworkProbeService probeService;
+    private final IntegrationFacade integrationFacade;
 
     /** Верхняя граница ожидания пинга одного устройства (ICMP + перебор TCP-портов). */
     private static final long PING_TIMEOUT_MS = 8000;
@@ -105,6 +106,11 @@ public class DeviceFacadeImpl implements DeviceFacade {
     }
 
     @Override
+    public Optional<DeviceInfo> findDeviceEntity(Long id) {
+        return deviceService.findById(id);
+    }
+
+    @Override
     public List<DeviceInfo> getDeviceEntities(List<Long> ids) {
         return deviceService.getAllByIds(ids);
     }
@@ -160,7 +166,7 @@ public class DeviceFacadeImpl implements DeviceFacade {
                 futures.put(d.id(), CompletableFuture.completedFuture(false));
             } else {
                 futures.put(d.id(), CompletableFuture
-                        .supplyAsync(() -> probeService.isReachable(ip), pingPool)
+                        .supplyAsync(() -> integrationFacade.isReachable(ip), pingPool)
                         .completeOnTimeout(false, PING_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                         .exceptionally(ex -> false));
             }

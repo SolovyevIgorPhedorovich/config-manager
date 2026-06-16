@@ -1,5 +1,5 @@
 // events/AuthEvent.java
-package com.uniikm.configmanager.auth.events;
+package com.uniikm.configmanager.auth.event;
 
 import com.uniikm.configmanager.audit.enums.AuditAction;
 

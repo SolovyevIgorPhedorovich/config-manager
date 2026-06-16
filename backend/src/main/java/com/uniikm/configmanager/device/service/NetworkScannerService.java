@@ -10,13 +10,13 @@ import com.uniikm.configmanager.device.model.DeviceGroup;
 import com.uniikm.configmanager.device.model.DeviceIP;
 import com.uniikm.configmanager.device.model.DeviceInfo;
 import com.uniikm.configmanager.device.model.DeviceOS;
-import com.uniikm.configmanager.config.service.DeviceConfigCaptureService;
+import com.uniikm.configmanager.config.facade.ConfigFacade;
 import com.uniikm.configmanager.device.repository.DeviceGroupRepository;
 import com.uniikm.configmanager.device.repository.DeviceOSRepository;
 import com.uniikm.configmanager.device.repository.DeviceRepository;
 import com.uniikm.configmanager.integration.dto.DeviceProbeResult;
 import com.uniikm.configmanager.integration.dto.ScanConfig;
-import com.uniikm.configmanager.integration.service.NetworkProbeService;
+import com.uniikm.configmanager.integration.facade.IntegrationFacade;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -47,8 +47,8 @@ public class NetworkScannerService {
     private final DeviceMapper deviceMapper;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
-    private final NetworkProbeService networkProbeService;
-    private final DeviceConfigCaptureService configCaptureService;
+    private final IntegrationFacade integrationFacade;
+    private final ConfigFacade configFacade;
     private final Executor taskExecutor;
 
     @Value("${network-scan.redis-key-prefix:network-scan}")
@@ -72,8 +72,8 @@ public class NetworkScannerService {
                                  DeviceMapper deviceMapper,
                                  ObjectMapper objectMapper,
                                  StringRedisTemplate redisTemplate,
-                                 NetworkProbeService networkProbeService,
-                                 DeviceConfigCaptureService configCaptureService,
+                                 IntegrationFacade integrationFacade,
+                                 ConfigFacade configFacade,
                                  @Qualifier("taskExecutor") Executor taskExecutor) {
         this.deviceRepo = deviceRepo;
         this.deviceGroupRepo = deviceGroupRepo;
@@ -81,8 +81,8 @@ public class NetworkScannerService {
         this.deviceMapper = deviceMapper;
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
-        this.networkProbeService = networkProbeService;
-        this.configCaptureService = configCaptureService;
+        this.integrationFacade = integrationFacade;
+        this.configFacade = configFacade;
         this.taskExecutor = taskExecutor;
     }
 
@@ -183,7 +183,7 @@ public class NetworkScannerService {
         String ip = device.getIps().isEmpty() ? device.getHostname() : device.getIps().get(0).getIp();
         log.info("Инвентаризация устройства {} ({})", device.getHostname(), ip);
 
-        DeviceProbeResult probe = networkProbeService.probe(ip, config);
+        DeviceProbeResult probe = integrationFacade.probe(ip, config);
         if (probe == null) {
             Map<String, Object> failure = new LinkedHashMap<>();
             failure.put("success", false);
@@ -239,13 +239,13 @@ public class NetworkScannerService {
 
             for (String ipStr : ipsToScan) {
                 probeFutures.add(CompletableFuture.supplyAsync(() -> {
-                    DeviceProbeResult r = networkProbeService.probe(ipStr, config);
+                    DeviceProbeResult r = integrationFacade.probe(ipStr, config);
                     saveProgress(taskId, done.incrementAndGet(), total);
                     return r;
                 }, executor));
             }
 
-            int futureTimeoutMs = networkProbeService.getPingTimeoutMs() + 15000;
+            int futureTimeoutMs = integrationFacade.getPingTimeoutMs() + 15000;
             List<DeviceProbeResult> probeResults = probeFutures.stream()
                     .map(f -> {
                         try { return f.get(futureTimeoutMs, TimeUnit.MILLISECONDS); }
@@ -350,7 +350,7 @@ public class NetworkScannerService {
     /** Захват/сверка конфигурации; сбой захвата не должен ломать сканирование. */
     private void safeCapture(Long deviceId, DeviceProbeResult probe) {
         try {
-            configCaptureService.captureAndReconcile(deviceId, probe);
+            configFacade.captureAndReconcile(deviceId, probe);
         } catch (Exception e) {
             log.warn("Захват конфигурации устройства {} не удался: {}", deviceId, e.getMessage());
         }

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uniikm.configmanager.audit.enums.AuditAction;
 import com.uniikm.configmanager.device.dto.DeviceRequest;
 import com.uniikm.configmanager.device.dto.mapper.DeviceMapper;
-import com.uniikm.configmanager.device.events.DeviceEvent;
+import com.uniikm.configmanager.device.event.DeviceEvent;
 import com.uniikm.configmanager.device.model.DeviceGroup;
 import com.uniikm.configmanager.device.model.DeviceIP;
 import com.uniikm.configmanager.device.model.DeviceInfo;
@@ -12,6 +12,8 @@ import com.uniikm.configmanager.device.model.DeviceOS;
 import com.uniikm.configmanager.device.repository.DeviceGroupRepository;
 import com.uniikm.configmanager.device.repository.DeviceOSRepository;
 import com.uniikm.configmanager.device.repository.DeviceRepository;
+
+import java.util.Optional;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -99,6 +101,11 @@ public class DeviceService {
     public DeviceInfo getById(Long id) {
         return deviceRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Устройство не найдено"));
+    }
+
+    /** Чтение устройства без исключения: пусто, если не найдено. */
+    public Optional<DeviceInfo> findById(Long id) {
+        return deviceRepository.findById(id);
     }
 
     @Transactional

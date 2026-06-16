@@ -2,8 +2,8 @@ package com.uniikm.configmanager.integration.service;
 
 import com.uniikm.configmanager.common.dto.ConnectionProtocol;
 import com.uniikm.configmanager.common.dto.DeviceCommandTarget;
-import com.uniikm.configmanager.integration.adater.SSHAdapter;
-import com.uniikm.configmanager.integration.adater.WinRMAdapter;
+import com.uniikm.configmanager.integration.adapter.SSHAdapter;
+import com.uniikm.configmanager.integration.adapter.WinRMAdapter;
 import com.uniikm.configmanager.integration.dto.DeviceProbeResult;
 import com.uniikm.configmanager.integration.dto.ScanConfig;
 

@@ -5,8 +5,8 @@ import com.uniikm.configmanager.config.model.ConfigVersion;
 import com.uniikm.configmanager.config.model.DeviceConfig;
 import com.uniikm.configmanager.config.repository.DeviceConfigRepository;
 import com.uniikm.configmanager.config.service.DeviceConfigService.ConfigureResult;
+import com.uniikm.configmanager.device.facade.DeviceFacade;
 import com.uniikm.configmanager.device.model.DeviceInfo;
-import com.uniikm.configmanager.device.repository.DeviceRepository;
 
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +25,7 @@ import java.util.concurrent.CompletableFuture;
 @RequiredArgsConstructor
 public class DeviceConfigService {
 
-    private final DeviceRepository deviceRepository;
+    private final DeviceFacade deviceFacade;
     private final ObjectMapper objectMapper;
     private final DeviceConfigRepository deviceConfigRepository;
 
@@ -49,8 +49,7 @@ public class DeviceConfigService {
     public CompletableFuture<ConfigureResult> configureDevice(Long deviceId, String configJson) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                DeviceInfo device = deviceRepository.findById(deviceId)
-                    .orElseThrow(() -> new RuntimeException("Устройство не найдено"));
+                DeviceInfo device = deviceFacade.getDeviceEntity(deviceId);
 
                 log.info("Применение настроек для устройства: {} (тип: {})", 
                     device.getHostname(), device.getType());

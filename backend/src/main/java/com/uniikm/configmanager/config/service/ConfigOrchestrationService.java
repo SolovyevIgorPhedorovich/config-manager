@@ -14,8 +14,7 @@ import com.uniikm.configmanager.config.event.ConfigApplyEvent;
 import com.uniikm.configmanager.config.model.ConfigVersion;
 import com.uniikm.configmanager.device.model.DeviceInfo;
 import com.uniikm.configmanager.integration.dto.CommandExecutionRequest;
-import com.uniikm.configmanager.integration.server.RemoteCommandService;
-import com.uniikm.configmanager.integration.service.NetworkProbeService;
+import com.uniikm.configmanager.integration.facade.IntegrationFacade;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,10 +45,9 @@ public class ConfigOrchestrationService {
     private final CiscoConfigCommandGenerator ciscoCommandGenerator;
     private final ProxmoxConfigCommandGenerator proxmoxCommandGenerator;
     private final MFUConfigCommandGenerator mfuCommandGenerator;
-    private final RemoteCommandService remoteCommandService;
+    private final IntegrationFacade integrationFacade;
     private final RedisTemplate<String, Object> redisTemplate;
     private final ApplicationEventPublisher eventPublisher;
-    private final NetworkProbeService probeService;
 
     // Очередь отложенного применения. @Lazy разрывает циклическую зависимость:
     // поллер очереди вызывает executeApply() этого сервиса.
@@ -107,7 +105,7 @@ public class ConfigOrchestrationService {
 
         // 3. Гейт по доступности: офлайн-устройство → в очередь отложенного применения
         String ip = primaryIp(device);
-        if (!probeService.isReachable(ip)) {
+        if (!integrationFacade.isReachable(ip)) {
             scheduledConfigApplyService.enqueue(device, newVersion, creds, source, batchId);
             log.info("Устройство {} ({}) офлайн — применение версии {} запланировано",
                     deviceId, ip, newVersion.getId());
@@ -135,7 +133,7 @@ public class ConfigOrchestrationService {
     public ApplyConfigResponse applyVersion(DeviceInfo device, ConfigVersion version,
                                             DeviceCredentials creds, String source) {
         String ip = primaryIp(device);
-        if (!probeService.isReachable(ip)) {
+        if (!integrationFacade.isReachable(ip)) {
             scheduledConfigApplyService.enqueue(device, version, creds, source, null);
             return new ApplyConfigResponse(null, List.of(), List.of(device.getId()));
         }
@@ -191,7 +189,7 @@ public class ConfigOrchestrationService {
 
         CommandExecutionRequest execRequest = new CommandExecutionRequest(command, List.of(target), null, groupTaskId);
 
-        remoteCommandService.executeAsync(execRequest);
+        integrationFacade.executeAsync(execRequest);
 
         eventPublisher.publishEvent(new ConfigApplyEvent(
             "CONFIG_APPLY_STARTED",

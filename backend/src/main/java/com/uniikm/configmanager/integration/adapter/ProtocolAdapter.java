@@ -1,4 +1,4 @@
-package com.uniikm.configmanager.integration.adater;
+package com.uniikm.configmanager.integration.adapter;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;

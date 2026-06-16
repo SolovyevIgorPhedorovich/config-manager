@@ -1,0 +1,20 @@
+# Производственный профиль (SPRING_PROFILES_ACTIVE=prod).
+# Параметры подключения к БД задаются ТОЛЬКО через переменные окружения, без
+# значений по умолчанию — приложение не стартует, если они не заданы (fail-fast).
+# Секреты в репозитории не хранятся.
+#
+# Обязательные переменные: DB_HOST, DB_NAME, DB_USER, DB_PASSWORD
+# (опционально DB_PORT, REDIS_HOST/REDIS_PORT/REDIS_PASSWORD).
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  jpa:
+    show-sql: false
+
+logging:
+  level:
+    root: INFO
+    org.hibernate.SQL: WARN
+    org.springframework.security: WARN

@@ -21,8 +21,10 @@ import com.uniikm.configmanager.config.dto.ConfigStatusResponse;
 import com.uniikm.configmanager.config.model.ConfigVersion;
 import com.uniikm.configmanager.config.service.ConfigOrchestrationService;
 import com.uniikm.configmanager.config.service.ConfigVersionService;
+import com.uniikm.configmanager.config.service.DeviceConfigCaptureService;
 import com.uniikm.configmanager.config.service.DeviceConfigService;
 import com.uniikm.configmanager.device.facade.DeviceFacade;
+import com.uniikm.configmanager.integration.dto.DeviceProbeResult;
 
 import lombok.RequiredArgsConstructor;
 
@@ -31,6 +33,7 @@ import lombok.RequiredArgsConstructor;
 public class ConfigFacadeImpl implements ConfigFacade {
     private final DeviceFacade deviceFacade;
     private final ConfigOrchestrationService orchestrationService;
+    private final DeviceConfigCaptureService deviceConfigCaptureService;
     private final ObjectMapper objectMapper;
     private final ConfigVersionService configVersionService;
     private final RedisTemplate<String, Object> redisTemplate;
@@ -125,5 +128,10 @@ public class ConfigFacadeImpl implements ConfigFacade {
 
         return statuses;
     }
-    
+
+    @Override
+    public void captureAndReconcile(Long deviceId, DeviceProbeResult probe) {
+        deviceConfigCaptureService.captureAndReconcile(deviceId, probe);
+    }
+
 }

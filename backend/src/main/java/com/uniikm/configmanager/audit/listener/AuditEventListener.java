@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uniikm.configmanager.audit.event.AuditEvent;
 import com.uniikm.configmanager.audit.model.EventLogEntity;
 import com.uniikm.configmanager.audit.repository.AuditLogRepository;
-import com.uniikm.configmanager.auth.events.AuthEvent;
+import com.uniikm.configmanager.auth.event.AuthEvent;
 import com.uniikm.configmanager.auth.utils.SecurityFacade;
-import com.uniikm.configmanager.device.events.DeviceEvent;
+import com.uniikm.configmanager.device.event.DeviceEvent;
 
 import lombok.RequiredArgsConstructor;
 
