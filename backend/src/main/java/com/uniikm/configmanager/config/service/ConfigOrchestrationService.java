@@ -1,6 +1,7 @@
 package com.uniikm.configmanager.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.uniikm.configmanager.cache.ConfigApplyStatusStore;
 import com.uniikm.configmanager.common.dto.ConnectionProtocol;
 import com.uniikm.configmanager.common.dto.DeviceCommandTarget;
 import com.uniikm.configmanager.config.command.CiscoConfigCommandGenerator;
@@ -22,11 +23,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -46,7 +44,7 @@ public class ConfigOrchestrationService {
     private final ProxmoxConfigCommandGenerator proxmoxCommandGenerator;
     private final MFUConfigCommandGenerator mfuCommandGenerator;
     private final IntegrationFacade integrationFacade;
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final ConfigApplyStatusStore applyStatusStore;
     private final ApplicationEventPublisher eventPublisher;
 
     // Очередь отложенного применения. @Lazy разрывает циклическую зависимость:
@@ -76,8 +74,7 @@ public class ConfigOrchestrationService {
             if (result.groupTaskId() != null) groupTaskIds.add(result.groupTaskId());
             if (result.scheduled()) scheduledDeviceIds.add(device.getId());
         }
-        redisTemplate.opsForList().rightPushAll("config:batch" + batchId, groupTaskIds);
-        redisTemplate.expire("config:batch" + batchId, Duration.ofHours(1));
+        applyStatusStore.saveBatchTaskIds(batchId, groupTaskIds);
         return new ApplyConfigResponse(batchId, groupTaskIds, scheduledDeviceIds);
     }
 
@@ -175,17 +172,10 @@ public class ConfigOrchestrationService {
 
         DeviceCommandTarget target = buildDeviceCommandTarget(device, creds);
 
-        // Redis: записываем ДО запуска задачи, чтобы избежать race condition
+        // Статус задачи: записываем ДО запуска выполнения, чтобы избежать race condition
         String groupTaskId = UUID.randomUUID().toString();
-        String redisKey = "config:apply:" + groupTaskId;
-        redisTemplate.opsForHash().putAll(redisKey, Map.of(
-            "deviceId", deviceId,
-            "configVersionId", version.getId(),
-            "status", "IN_PROGRESS",
-            "startedAt", Instant.now().toString()
-        ));
-        redisTemplate.expire(redisKey, Duration.ofHours(1));
-        redisTemplate.opsForValue().set("device:current-task:" + deviceId, groupTaskId, Duration.ofHours(1));
+        applyStatusStore.initApplyStatus(groupTaskId, deviceId, version.getId());
+        applyStatusStore.setCurrentTask(deviceId, groupTaskId);
 
         CommandExecutionRequest execRequest = new CommandExecutionRequest(command, List.of(target), null, groupTaskId);
 

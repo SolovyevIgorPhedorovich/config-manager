@@ -23,7 +23,7 @@ import com.uniikm.configmanager.auth.event.AuthEvent;
 import com.uniikm.configmanager.auth.model.User;
 import com.uniikm.configmanager.auth.repository.UserRepository;
 import com.uniikm.configmanager.auth.service.JwtService;
-import com.uniikm.configmanager.auth.service.TokenBlacklistService;
+import com.uniikm.configmanager.cache.TokenBlacklistStore;
 
 @Slf4j
 @Service
@@ -33,7 +33,7 @@ public class AuthFacadeImpl implements AuthFacade {
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
     private final AuthMapper authMapper;
-    private final TokenBlacklistService blacklist;
+    private final TokenBlacklistStore blacklist;
     private final ApplicationEventPublisher eventPublisher;
     private final UserRepository userRepository;
 

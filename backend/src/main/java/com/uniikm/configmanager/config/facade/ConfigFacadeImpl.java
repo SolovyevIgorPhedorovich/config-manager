@@ -1,16 +1,15 @@
 package com.uniikm.configmanager.config.facade;
 
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flipkart.zjsonpatch.JsonDiff;
+import com.uniikm.configmanager.cache.ConfigApplyStatusStore;
 import com.uniikm.configmanager.config.dto.ApplyConfigRequest;
 import com.uniikm.configmanager.config.dto.ApplyConfigResponse;
 import com.uniikm.configmanager.config.dto.ConfigCompareRequest;
@@ -36,7 +35,7 @@ public class ConfigFacadeImpl implements ConfigFacade {
     private final DeviceConfigCaptureService deviceConfigCaptureService;
     private final ObjectMapper objectMapper;
     private final ConfigVersionService configVersionService;
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final ConfigApplyStatusStore applyStatusStore;
 
     @Override
     public ApplyConfigResponse apply(ApplyConfigRequest request) {
@@ -84,49 +83,25 @@ public class ConfigFacadeImpl implements ConfigFacade {
 
     @Override
     public ConfigStatusResponse getApplyGroupStatus(String groupTaskId) {
-        Map<Object, Object> h = redisTemplate.opsForHash().entries("config:apply:" + groupTaskId);
-        if (h == null || h.isEmpty()) {
-            // Ключ ещё не создан или истёк — считаем статус неизвестным
-            return new ConfigStatusResponse(groupTaskId, "UNKNOWN", null, null, null, null);
-        }
-        return new ConfigStatusResponse(
-                groupTaskId,
-                asStr(h.get("status")),
-                asLong(h.get("deviceId")),
-                asStr(h.get("startedAt")),
-                asStr(h.get("finishedAt")),
-                asStr(h.get("errorMessage"))
-        );
-    }
-
-    private String asStr(Object o) {
-        return o == null ? null : o.toString();
-    }
-
-    private Long asLong(Object o) {
-        if (o == null) return null;
-        if (o instanceof Number n) return n.longValue();
-        try { return Long.valueOf(o.toString()); } catch (NumberFormatException e) { return null; }
+        return applyStatusStore.getApplyStatus(groupTaskId)
+                .map(v -> new ConfigStatusResponse(
+                        groupTaskId, v.status(), v.deviceId(), v.startedAt(), v.finishedAt(), v.errorMessage()))
+                // Ключ ещё не создан или истёк — считаем статус неизвестным
+                .orElse(new ConfigStatusResponse(groupTaskId, "UNKNOWN", null, null, null, null));
     }
 
     @Override
     public List<ConfigStatusResponse> getStatus(String batchId) {
-        String key = "config:batch:" + batchId;
-
-        List<Object> taskGroupIds =
-                redisTemplate.opsForList().range(key, 0, -1);
+        List<Object> taskGroupIds = applyStatusStore.getBatchTaskIds(batchId);
 
         if (taskGroupIds == null || taskGroupIds.isEmpty()) {
             throw new IllegalArgumentException("Batch not found: " + batchId);
         }
 
-        List<ConfigStatusResponse> statuses =
-        taskGroupIds.stream()
+        return taskGroupIds.stream()
                 .map(Object::toString)
-                .flatMap(id -> getStatus(id).stream())
+                .map(this::getApplyGroupStatus)
                 .collect(Collectors.toList());
-
-        return statuses;
     }
 
     @Override

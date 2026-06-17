@@ -3,6 +3,7 @@ package com.uniikm.configmanager.integration.server;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uniikm.configmanager.audit.enums.TaskStatus;
+import com.uniikm.configmanager.cache.RemoteCommandTaskStore;
 import com.uniikm.configmanager.common.dto.ConnectionProtocol;
 import com.uniikm.configmanager.common.dto.DeviceCommandTarget;
 import com.uniikm.configmanager.config.event.TaskCompletedEvent;
@@ -16,7 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -40,31 +40,25 @@ public class RemoteCommandService {
     @Value("${snmp.default-port:161}")
     private int defaultSnmpPort;
 
-    private final StringRedisTemplate redisTemplate;
+    private final RemoteCommandTaskStore taskStore;
     private final ObjectMapper objectMapper;
     private final Executor taskExecutor;
     private final ProtocolAdapterFactory adapterFactory;
     private final ApplicationEventPublisher eventPublisher;
 
     public RemoteCommandService(
-            StringRedisTemplate redisTemplate,
+            RemoteCommandTaskStore taskStore,
             ObjectMapper objectMapper,
             @Qualifier("taskExecutor") Executor taskExecutor,
             ProtocolAdapterFactory adapterFactory,
             ApplicationEventPublisher eventPublisher
     ) {
-        this.redisTemplate = redisTemplate;
+        this.taskStore = taskStore;
         this.objectMapper = objectMapper;
         this.taskExecutor = taskExecutor;
         this.adapterFactory = adapterFactory;
         this.eventPublisher = eventPublisher;
     }
-
-    @Value("${remote-command.redis-key-prefix:remote-command}")
-    private String redisKeyPrefix;
-
-    @Value("${remote-command.result-ttl:PT24H}")
-    private Duration resultTtl;
 
     @Value("${remote-command.default-timeout:PT60S}")
     private Duration defaultTimeout;
@@ -96,10 +90,10 @@ public class RemoteCommandService {
             );
             queuedTasks.add(queued);
             saveTaskResult(queued);
-            redisTemplate.opsForList().rightPush(groupTasksKey(groupTaskId), taskId);
+            taskStore.addTaskToGroup(groupTaskId, taskId);
         }
 
-        redisTemplate.expire(groupTasksKey(groupTaskId), resultTtl);
+        taskStore.expireGroup(groupTaskId);
 
         for (int i = 0; i < request.targets().size(); i++) {
             DeviceCommandTarget target = request.targets().get(i);
@@ -112,7 +106,7 @@ public class RemoteCommandService {
     }
 
     public CommandGroupStatus getGroupStatus(String groupTaskId) {
-        List<String> taskIds = redisTemplate.opsForList().range(groupTasksKey(groupTaskId), 0, -1);
+        List<String> taskIds = taskStore.getGroupTaskIds(groupTaskId);
         if (taskIds == null || taskIds.isEmpty()) {
             throw new IllegalArgumentException("Задача не найдена: " + groupTaskId);
         }
@@ -125,7 +119,7 @@ public class RemoteCommandService {
     }
 
     public CommandTaskResult getTaskResult(String taskId) {
-        String value = redisTemplate.opsForValue().get(taskKey(taskId));
+        String value = taskStore.getTaskJson(taskId);
         if (value == null) {
             throw new IllegalArgumentException("Задача не найдена: " + taskId);
         }
@@ -286,7 +280,7 @@ public class RemoteCommandService {
 
     private void saveTaskResult(CommandTaskResult result) {
         try {
-            redisTemplate.opsForValue().set(taskKey(result.taskId()), objectMapper.writeValueAsString(result), resultTtl);
+            taskStore.saveTaskJson(result.taskId(), objectMapper.writeValueAsString(result));
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Не удалось сохранить результат задачи " + result.taskId(), e);
         }
@@ -333,11 +327,4 @@ public class RemoteCommandService {
         }
     }
 
-    private String groupTasksKey(String groupTaskId) {
-        return redisKeyPrefix + ":group:" + groupTaskId;
-    }
-
-    private String taskKey(String taskId) {
-        return redisKeyPrefix + ":task:" + taskId;
-    }
 }

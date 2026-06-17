@@ -10,6 +10,7 @@ import com.uniikm.configmanager.device.model.DeviceGroup;
 import com.uniikm.configmanager.device.model.DeviceIP;
 import com.uniikm.configmanager.device.model.DeviceInfo;
 import com.uniikm.configmanager.device.model.DeviceOS;
+import com.uniikm.configmanager.cache.ScanTaskStore;
 import com.uniikm.configmanager.config.facade.ConfigFacade;
 import com.uniikm.configmanager.device.repository.DeviceGroupRepository;
 import com.uniikm.configmanager.device.repository.DeviceOSRepository;
@@ -21,14 +22,12 @@ import com.uniikm.configmanager.integration.facade.IntegrationFacade;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.InetAddress;
-import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -46,16 +45,10 @@ public class NetworkScannerService {
     private final DeviceOSRepository deviceOSRepo;
     private final DeviceMapper deviceMapper;
     private final ObjectMapper objectMapper;
-    private final StringRedisTemplate redisTemplate;
+    private final ScanTaskStore scanTaskStore;
     private final IntegrationFacade integrationFacade;
     private final ConfigFacade configFacade;
     private final Executor taskExecutor;
-
-    @Value("${network-scan.redis-key-prefix:network-scan}")
-    private String redisKeyPrefix;
-
-    @Value("${network-scan.result-ttl:PT5M}")
-    private Duration resultTtl;
 
     @Value("${network-scan.max-hosts:256}")
     private int maxHosts;
@@ -71,7 +64,7 @@ public class NetworkScannerService {
                                  DeviceOSRepository deviceOSRepo,
                                  DeviceMapper deviceMapper,
                                  ObjectMapper objectMapper,
-                                 StringRedisTemplate redisTemplate,
+                                 ScanTaskStore scanTaskStore,
                                  IntegrationFacade integrationFacade,
                                  ConfigFacade configFacade,
                                  @Qualifier("taskExecutor") Executor taskExecutor) {
@@ -80,7 +73,7 @@ public class NetworkScannerService {
         this.deviceOSRepo = deviceOSRepo;
         this.deviceMapper = deviceMapper;
         this.objectMapper = objectMapper;
-        this.redisTemplate = redisTemplate;
+        this.scanTaskStore = scanTaskStore;
         this.integrationFacade = integrationFacade;
         this.configFacade = configFacade;
         this.taskExecutor = taskExecutor;
@@ -154,8 +147,7 @@ public class NetworkScannerService {
             running.put("message", "Сканирование: " + scanned + "/" + total);
             return ResponseEntity.ok(running);
         }
-        redisTemplate.delete(taskKey(taskId));
-        redisTemplate.delete(progressKey(taskId));
+        scanTaskStore.clear(taskId);
 
         long newCount      = results.stream().filter(r -> "NEW".equals(r.scanStatus())).count();
         long existingCount = results.stream().filter(r -> "EXISTING".equals(r.scanStatus())).count();
@@ -468,19 +460,18 @@ public class NetworkScannerService {
         return s.length() <= max ? s : s.substring(0, max);
     }
 
-    // ── Redis ─────────────────────────────────────────────────────────────────
+    // ── Состояние задач сканирования (через ScanTaskStore) ─────────────────────
 
     private void saveScanResult(String taskId, List<ScanResultEntry> results) {
         try {
-            String json = objectMapper.writeValueAsString(results);
-            redisTemplate.opsForValue().set(taskKey(taskId), json, resultTtl);
+            scanTaskStore.saveResultJson(taskId, objectMapper.writeValueAsString(results));
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialize scan result for task " + taskId, e);
         }
     }
 
     private List<ScanResultEntry> getScanResult(String taskId) {
-        String json = redisTemplate.opsForValue().get(taskKey(taskId));
+        String json = scanTaskStore.getResultJson(taskId);
         if (json == null) return null;
         try {
             return objectMapper.readValue(
@@ -493,33 +484,12 @@ public class NetworkScannerService {
         }
     }
 
-    private String taskKey(String taskId) {
-        return redisKeyPrefix + ":task:" + taskId;
-    }
-
-    // ── Прогресс сканирования (done/total) ─────────────────────────────────────
-
-    private String progressKey(String taskId) {
-        return redisKeyPrefix + ":progress:" + taskId;
-    }
-
     private void saveProgress(String taskId, int done, int total) {
-        try {
-            redisTemplate.opsForValue().set(progressKey(taskId), done + "/" + total, resultTtl);
-        } catch (Exception e) {
-            log.debug("Не удалось сохранить прогресс {}: {}", taskId, e.getMessage());
-        }
+        scanTaskStore.saveProgress(taskId, done, total);
     }
 
     /** Возвращает [done, total] или null, если прогресс ещё не записан. */
     private int[] readProgress(String taskId) {
-        String v = redisTemplate.opsForValue().get(progressKey(taskId));
-        if (v == null || !v.contains("/")) return null;
-        try {
-            String[] p = v.split("/", 2);
-            return new int[]{ Integer.parseInt(p[0]), Integer.parseInt(p[1]) };
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        return scanTaskStore.readProgress(taskId);
     }
 }

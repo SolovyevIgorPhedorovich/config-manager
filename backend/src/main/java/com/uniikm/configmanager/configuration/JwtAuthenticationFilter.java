@@ -13,8 +13,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.uniikm.configmanager.auth.service.JwtService;
-import com.uniikm.configmanager.auth.service.TokenBlacklistService;
 import com.uniikm.configmanager.auth.utils.CustomUserDetails;
+import com.uniikm.configmanager.cache.TokenBlacklistStore;
 
 import java.io.IOException;
 import java.util.List;
@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
-    private final TokenBlacklistService blacklist;
+    private final TokenBlacklistStore blacklist;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
